@@ -1,0 +1,36 @@
+{
+  "dense_retrieval": {
+    "backend": "svd_tfidf",
+    "sentence_transformer_model": "BAAI/bge-small-zh-v1.5",
+    "svd_tfidf": {
+      "max_features": 30000,
+      "ngram_range": [1, 2],
+      "n_components": 256
+    }
+  },
+  "hybrid_retrieval": {
+    "strategy": "rrf",
+    "rrf_k": 60,
+    "candidate_pool": 80
+  },
+  "fine_tuning": {
+    "task": "punishment_type_multilabel",
+    "baseline_model": "tfidf_logistic_regression",
+    "transformer_model": "hfl/chinese-macbert-base",
+    "max_length": 512,
+    "batch_size": 4,
+    "learning_rate": 2e-5,
+    "num_train_epochs": 3
+  },
+  "intent_router": {
+    "backend": "tfidf_logistic_regression",
+    "artifact_path": "artifacts/intent_classifier/intent_model.pkl"
+  },
+  "response_generation": {
+    "backend": "local_hf",
+    "model_name": "artifacts/models/Qwen2.5-0.5B-Instruct",
+    "max_new_tokens": 256,
+    "temperature": 0.2,
+    "top_p": 0.9
+  }
+}
