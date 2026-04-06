@@ -176,3 +176,19 @@ For each meaningful session, append:
   - Improve local response quality or swap to a stronger local model before final report/demo polishing.
   - Replace `svd_tfidf` with a real Chinese embedding model and add reranking.
   - Connect the punishment-type prediction model into the frontend as a separate comparison or supporting signal.
+
+## 2026-04-06 Frontend Test + GitHub Repository Setup
+
+- Task: Start the local frontend for immediate testing and publish the current project to GitHub as `Deeplearning-Rag-Test`.
+- Key decisions:
+  - Start the existing demo server in place instead of changing the frontend stack before testing.
+  - Create the GitHub repository as `private` by default because visibility was not specified.
+  - Exclude the local virtual environment, local Hugging Face model directory, caches, and secret files from version control before publishing.
+- What changed:
+  - Verified the demo frontend is reachable at `http://127.0.0.1:8000`.
+  - Added `.gitignore` for repo-safe publishing boundaries.
+  - Initialized git in the workspace, created the initial commit, and pushed `main` to `Mindse-Tt/Deeplearning-Rag-Test`.
+  - Recorded that the repository now exists on GitHub and the workspace is no longer non-git.
+- What remains open:
+  - Decide whether the GitHub repository should remain private or be changed to public.
+  - Reduce or externalize the oversized processed data files if the repository should be lighter to clone or easier to maintain.
