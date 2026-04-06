@@ -19,7 +19,7 @@ Turn the CSRC punishment project from planning into execution with:
 - A Python 3.11 environment exists for `openai-agents`.
 - A runnable agent-team workflow exists at `tools/agent_team_runner.py`.
 - A reusable project bootstrap script exists at `tools/bootstrap_codex_workspace.py`.
-- This workspace is currently not a git repository, so file inspection is the available source of truth for local changes.
+- This workspace is now a git repository with `main` as the default branch and `origin` set to `git@github.com:Mindse-Tt/Deeplearning-Rag-Test.git`.
 - The current project input is [证监会处罚信息表.xlsx](/Users/mindset/Desktop/深度学习大作业/证监会处罚信息表.xlsx), which contains one visible sheet with 14,740 data rows and 24 actual fields despite broken Excel dimension metadata.
 - The dataset mixes event-level text with party-level punishment rows: 14,740 rows map to 4,233 unique `EventID`s, and 2,109 events have multiple rows.
 - The user confirmed that the project should be framed in `RAG` mode rather than a generic knowledge-based pipeline.
@@ -86,6 +86,8 @@ Turn the CSRC punishment project from planning into execution with:
   - query plan
   - retrieved events
 - The current recommended way to run the full local stack is `.venv311/bin/python scripts/run_demo_server.py`.
+- The project has now been published to GitHub as a private repository:
+  - `https://github.com/Mindse-Tt/Deeplearning-Rag-Test`
 
 ## Next Actions
 
@@ -97,6 +99,7 @@ Turn the CSRC punishment project from planning into execution with:
 - Keep all future design choices aligned with the course deliverables: opening proposal, midterm check, final paper, demo, and reproducible code.
 - Start Codex with `zsh start_codex_team.sh`.
 - Use `zsh run_agent_team.sh "<task>"` when a task needs structured requirement and planning artifacts before Codex execution.
+- If the GitHub repository needs to become easier to clone or publish publicly, move oversized processed data files to Git LFS or replace them with smaller sample artifacts first.
 - Copy this setup into other projects with `python3.11 tools/bootstrap_codex_workspace.py <target-dir>`.
 - If long-term chat storage is important, keep launching Codex with `disable_response_storage=false` or change the global config intentionally later.
 - If programmable multi-agent orchestration is needed, add a small `openai-agents` runner script on top of the Python 3.11 environment.
@@ -111,5 +114,8 @@ Turn the CSRC punishment project from planning into execution with:
 - `PunishmentMeasure` directly describes sanctions and should not be used as a model input for punishment prediction because it creates label leakage.
 - Python compilation in this workspace should set `PYTHONPYCACHEPREFIX` into the project directory to avoid sandbox permission issues under the default cache path.
 - Running the local demo server from the sandbox required escalation because binding `127.0.0.1:8000` is restricted in the current environment.
+- The current GitHub repository includes two processed data files larger than GitHub's recommended `50MB` threshold:
+  - `data/processed/event_chunks.jsonl`
+  - `data/processed/party_samples.jsonl`
 - The system Python 3.9 environment can run `numpy/sklearn`, but `torch/transformers` were unstable there due OpenMP/shared-memory issues; `.venv311` is the stable path for transformer training.
 - The local Qwen 0.5B model is now runnable, but first-load latency is non-trivial and answer quality is still below a production-grade legal assistant; this should be presented as a course-project local baseline, not a final oracle.

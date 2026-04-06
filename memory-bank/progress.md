@@ -177,6 +177,40 @@
 - The frontend is now presentation-ready enough for team testing, but the best demo experience still depends on improving retrieval quality and response grounding.
 - The current dense component inside `hybrid` is still `svd_tfidf`; the next major technical upgrade should be a real Chinese embedding model plus reranking.
 
+## 2026-04-06 Frontend Launch + GitHub Publish
+
+### Completed
+
+- Added a repository-safe `.gitignore` that excludes:
+  - `.env`
+  - `.venv*`
+  - `artifacts/models/`
+  - cache directories
+  - agent run/session database artifacts
+- Initialized the local workspace as a git repository with branch `main`.
+- Created the first commit for the project:
+  - `5ecb50beafcd49b36aadb8c48c0f56a8960af0e6`
+- Authenticated `gh` against `github.com` under account `Mindse-Tt`.
+- Created the remote GitHub repository:
+  - `Mindse-Tt/Deeplearning-Rag-Test`
+- Added the `origin` remote and pushed `main` through SSH.
+
+### Verified
+
+- `curl http://127.0.0.1:8000/api/health` returns `{"status": "ok", "retrieval_mode": "hybrid"}` while the frontend server is running.
+- `curl http://127.0.0.1:8000/` returns the expected HTML shell for the chat-style frontend.
+- `gh auth status` reports a valid logged-in session for `Mindse-Tt`.
+- `gh repo create Deeplearning-Rag-Test --private --source . --remote origin --push ...` completed successfully.
+- `git status --short` is empty after push, confirming the local worktree is clean.
+
+### Notes
+
+- The repository was created as `private` by default as the safer assumption because the user did not explicitly request a public repository.
+- GitHub accepted the push, but emitted large-file warnings for:
+  - `data/processed/event_chunks.jsonl`
+  - `data/processed/party_samples.jsonl`
+- These files are below GitHub's hard `100MB` limit, but they should move to Git LFS or be replaced with lighter samples if the repository is meant for broader sharing or long-term maintenance.
+
 ## 2026-03-31
 
 ### Completed
