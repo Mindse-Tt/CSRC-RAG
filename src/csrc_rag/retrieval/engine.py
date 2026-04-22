@@ -7,12 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from csrc_rag.orchestration.intents import IntentDecision, IntentSpec, load_registry, route_query
+from csrc_rag.orchestration.topic_guard import is_out_of_scope
 from csrc_rag.retrieval.bm25 import BM25Index
-from csrc_rag.retrieval.dense import SentenceTransformerDenseEncoder, SvdTfidfDenseEncoder
+from csrc_rag.retrieval.dense import NumpyEmbeddingIndex, SentenceTransformerDenseEncoder, SvdTfidfDenseEncoder
 from csrc_rag.retrieval.hybrid import reciprocal_rank_fusion
 from csrc_rag.retrieval.query_builder import QueryPlan, build_query_plan
 from csrc_rag.response.responder import build_responder
-from csrc_rag.settings import CONFIG_DIR, PROCESSED_DIR
+from csrc_rag.settings import CONFIG_DIR, PROCESSED_DIR, PROJECT_ROOT
 from csrc_rag.utils import read_json
 
 
@@ -79,7 +80,16 @@ class RetrievalEngine:
         if self.retrieval_mode in {"dense", "hybrid"}:
             dense_cfg = self.model_config["dense_retrieval"]
             backend = dense_cfg["backend"]
-            if backend == "svd_tfidf":
+            if backend == "prebuilt":
+                params = dense_cfg["prebuilt"]
+                npy_path = PROJECT_ROOT / params["npy_path"]
+                order_path = PROJECT_ROOT / params["order_path"]
+                self.dense_encoder = NumpyEmbeddingIndex(
+                    npy_path=npy_path,
+                    order_path=order_path,
+                    query_model=params.get("query_model", "sentence-transformers/all-MiniLM-L6-v2"),
+                )
+            elif backend == "svd_tfidf":
                 params = dense_cfg["svd_tfidf"]
                 self.dense_encoder = SvdTfidfDenseEncoder(
                     max_features=params["max_features"],
@@ -117,6 +127,22 @@ class RetrievalEngine:
         forced_intent: str | None = None,
         history: list[dict[str, str]] | None = None,
     ) -> SearchResponse:
+        # ── 0. Topic guard ────────────────────────────────────────────────────
+        out_of_scope, guard_reason = is_out_of_scope(query)
+        if out_of_scope:
+            fallback_spec = list(self.registry.values())[0]
+            return SearchResponse(
+                intent="out_of_scope",
+                intent_confidence=1.0,
+                intent_method="topic_guard",
+                intent_scores={},
+                response_backend="topic_guard",
+                response_model=None,
+                query_plan={"retrieval_unit": "-", "top_k": 0, "metadata_filters": {}},
+                answer=guard_reason,
+                events=[],
+            )
+
         if forced_intent:
             intent_decision = IntentDecision(
                 spec=self.registry[forced_intent],

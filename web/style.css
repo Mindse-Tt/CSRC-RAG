@@ -597,6 +597,26 @@ body {
   display: none;
 }
 
+/* ── Confidence badge inside meta chip ──────────────────────────────── */
+.conf-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+/* ── Trend chart container ──────────────────────────────────────────── */
+.trend-chart-wrap {
+  padding: 16px !important;
+  background: #ffffff;
+}
+
+/* ── Loading animation ───────────────────────────────────────────────── */
 .loading-dot::after {
   content: "思考中...";
   animation: blink 1.2s infinite;

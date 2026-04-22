@@ -152,9 +152,21 @@ function renderMessages() {
     if (message.role === "assistant" && message.meta) {
       const meta = document.createElement("div");
       meta.className = "message-meta";
+
+      const conf = typeof message.meta.intentConfidence === "number"
+        ? message.meta.intentConfidence
+        : parseFloat(message.meta.intentConfidence) || 0;
+      const confColor = confidenceColor(conf);
+      const confLbl = confidenceLabel(conf);
+
+      // Intent chip with confidence colour
+      const intentChip = document.createElement("span");
+      intentChip.className = "meta-chip";
+      intentChip.innerHTML = `意图：${escapeHtml(message.meta.intent)} <span class="conf-badge" style="background:${confColor}">${confLbl} ${(conf * 100).toFixed(0)}%</span>`;
+      meta.appendChild(intentChip);
+
       [
-        `意图：${message.meta.intent}`,
-        `路由：${message.meta.intentMethod} (${message.meta.intentConfidence})`,
+        `路由：${message.meta.intentMethod}`,
         `回复：${message.meta.responseBackend}${message.meta.responseModel ? ` / ${message.meta.responseModel}` : ""}`,
         `检索：${message.meta.retrievalUnit || "-"} / top_k=${message.meta.topK || "-"}`,
       ].forEach((text) => {
@@ -233,6 +245,36 @@ function renderMessages() {
       });
       evidenceSection.appendChild(evidencePanel);
       foldStack.appendChild(evidenceSection);
+
+      // Trend chart — only for trend_analysis intent
+      if (message.meta.intent === "trend_analysis") {
+        const chartId = `trend-${message.meta._chartKey || Date.now()}`;
+        // Persist a stable key so re-renders reuse the same id
+        if (!message.meta._chartKey) message.meta._chartKey = chartId;
+
+        const trendSection = document.createElement("details");
+        trendSection.className = "fold-card";
+        trendSection.open = true;
+        trendSection.innerHTML = `<summary>年度趋势图</summary>`;
+
+        const trendContent = document.createElement("div");
+        trendContent.className = "fold-content trend-chart-wrap";
+        trendContent.id = chartId;
+        trendSection.appendChild(trendContent);
+        foldStack.appendChild(trendSection);
+
+        // Defer chart render so the DOM is attached first
+        setTimeout(() => {
+          let { years, counts } = parseYearCountsFromAnswer(message.content || "");
+          if (!years.length) {
+            ({ years, counts } = yearCountsFromEvents(message.meta.events || []));
+          }
+          if (years.length) {
+            renderTrendChart(chartId, years, counts);
+          }
+        }, 0);
+      }
+
       card.appendChild(foldStack);
     }
 
@@ -267,11 +309,125 @@ function autosizeTextarea() {
   queryInputEl.style.height = `${Math.min(queryInputEl.scrollHeight, 220)}px`;
 }
 
+// --- Confidence colouring helpers ---
+function confidenceColor(score) {
+  if (score >= 0.8) return "#16a34a";  // green
+  if (score >= 0.5) return "#d97706";  // amber
+  return "#dc2626";                    // red
+}
+
+function confidenceLabel(score) {
+  if (score >= 0.8) return "高";
+  if (score >= 0.5) return "中";
+  return "低";
+}
+
+// --- Trend chart helpers ---
+// Parse year-count pairs from the ASCII bar chart text produced by
+// TemplateResponder._trend_analysis.  The chart lines look like:
+//   2021  ████████████ 12件 (14.5%)
+function parseYearCountsFromAnswer(answerText) {
+  // Match: 4-digit year, whitespace, optional block chars, then count followed by 件
+  const re = /(\d{4})\s+[\u2588 ]*(\d+)\u4ef6/g;
+  const years = [];
+  const counts = [];
+  let match;
+  while ((match = re.exec(answerText)) !== null) {
+    years.push(match[1]);
+    counts.push(parseInt(match[2], 10));
+  }
+  return { years, counts };
+}
+
+// Build year counts from the returned events as a fallback
+function yearCountsFromEvents(events) {
+  const freq = {};
+  events.forEach((ev) => {
+    if (ev.declare_date) {
+      const m = ev.declare_date.match(/(\d{4})/);
+      if (m) {
+        const y = m[1];
+        freq[y] = (freq[y] || 0) + 1;
+      }
+    }
+  });
+  const years = Object.keys(freq).sort();
+  const counts = years.map((y) => freq[y]);
+  return { years, counts };
+}
+
+// Chart.js registry for active chart instances (keyed by canvas id)
+const _activeCharts = {};
+
+function renderTrendChart(containerId, years, counts) {
+  const canvasId = `chart-${containerId}`;
+  const existing = document.getElementById(canvasId);
+  if (existing) {
+    // Already rendered
+    return;
+  }
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const canvas = document.createElement("canvas");
+  canvas.id = canvasId;
+  canvas.style.maxHeight = "280px";
+  container.appendChild(canvas);
+
+  if (_activeCharts[canvasId]) {
+    _activeCharts[canvasId].destroy();
+  }
+  _activeCharts[canvasId] = new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: years,
+      datasets: [
+        {
+          label: "案件数量",
+          data: counts,
+          backgroundColor: "rgba(17, 17, 17, 0.75)",
+          borderRadius: 6,
+          borderSkipped: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.parsed.y} 件`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { font: { family: "inherit", size: 12 } },
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { stepSize: 1, font: { family: "inherit", size: 12 } },
+          grid: { color: "rgba(0,0,0,0.06)" },
+        },
+      },
+    },
+  });
+}
+
 function updateBadges(payload) {
   retrievalBadgeEl.textContent = payload.query_plan?.retrieval_unit
     ? `检索:${payload.query_plan.retrieval_unit}`
     : "Hybrid";
-  intentBadgeEl.textContent = `意图:${payload.intent}`;
+
+  const conf = typeof payload.intent_confidence === "number"
+    ? payload.intent_confidence
+    : parseFloat(payload.intent_confidence) || 0;
+  const label = confidenceLabel(conf);
+  const color = confidenceColor(conf);
+  intentBadgeEl.innerHTML = `意图:${escapeHtml(payload.intent)} <span style="color:${color};font-weight:700;">${label}(${(conf * 100).toFixed(0)}%)</span>`;
+
   replyBadgeEl.textContent = `回复:${payload.response_backend}`;
   sidebarStatusEl.textContent = payload.response_model || payload.response_backend || "已连接";
 }

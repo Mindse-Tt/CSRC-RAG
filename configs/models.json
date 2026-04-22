@@ -1,6 +1,11 @@
 {
   "dense_retrieval": {
-    "backend": "svd_tfidf",
+    "backend": "prebuilt",
+    "prebuilt": {
+      "npy_path": "data/processed/chunk_embeddings.npy",
+      "order_path": "data/processed/chunk_id_order.json",
+      "query_model": "sentence-transformers/all-MiniLM-L6-v2"
+    },
     "sentence_transformer_model": "BAAI/bge-small-zh-v1.5",
     "svd_tfidf": {
       "max_features": 30000,
@@ -27,8 +32,8 @@
     "artifact_path": "artifacts/intent_classifier/intent_model.pkl"
   },
   "response_generation": {
-    "backend": "local_hf",
-    "model_name": "artifacts/models/Qwen2.5-0.5B-Instruct",
+    "backend": "template",
+    "model_name": "Qwen/Qwen2.5-0.5B-Instruct",
     "max_new_tokens": 256,
     "temperature": 0.2,
     "top_p": 0.9
