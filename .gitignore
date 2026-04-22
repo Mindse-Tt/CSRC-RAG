@@ -20,7 +20,13 @@ project-memory/openai_agents_sessions.sqlite
 node_modules/
 
 # Large binaries / logs (rebuilt in M2)
-data/processed/chunk_embeddings.npy
+# All processed data is regenerable from 证监会处罚信息表.xlsx + scripts/build_*.py
+# Keep small summaries tracked; skip heavy jsonl/npy/chunk_id maps
+data/processed/*.jsonl
+data/processed/*.npy
+data/processed/chunk_id_order.json
+!data/processed/build_summary.json
+!data/processed/dense_index_summary_svd_tfidf.json
 server_test.log
 
 # Python egg-info
