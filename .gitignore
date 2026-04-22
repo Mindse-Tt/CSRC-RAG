@@ -26,3 +26,7 @@ server_test.log
 # Python egg-info
 *.egg-info/
 src/csrc_rag_project.egg-info/
+
+# smoke test throwaway data (regenerable from scripts/smoke_build_qa.py)
+data/train_smoke/
+artifacts/smoke_qwen*_lora/
