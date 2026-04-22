@@ -2,6 +2,6 @@
   "raw_rows": 14740,
   "event_documents": 4233,
   "party_samples": 14740,
-  "event_corpus_path": "/Users/mindset/Desktop/深度学习大作业/data/processed/event_corpus.jsonl",
-  "party_samples_path": "/Users/mindset/Desktop/深度学习大作业/data/processed/party_samples.jsonl"
+  "event_corpus_path": "data/processed/event_corpus.jsonl",
+  "party_samples_path": "data/processed/party_samples.jsonl"
 }

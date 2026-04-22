@@ -14,7 +14,7 @@
 - 第一版本地前端 Demo
 - 第一版 hybrid retrieval（当前默认 dense backend 为 `svd_tfidf`）
 - 第一版可训练处罚类型 baseline
-- `transformers + sentence-transformers` 训练环境：`.venv311`
+- `transformers + sentence-transformers` 训练环境：Windows Python 3.12（系统级）
 - 本地意图分类模型（`TF-IDF + Logistic Regression`）
 - 本地回复模型接入（默认 `Qwen/Qwen2.5-0.5B-Instruct`，失败时模板回退）
 - 聊天式前端改版（参考 `LKWCoach` 的左侧会话栏 + 中间对话区布局）
@@ -124,6 +124,8 @@ artifacts/               中间产物和输出
 ```bash
 .venv311/bin/python scripts/run_demo_server.py
 ```
+
+> Windows 下改为：`python scripts\run_demo_server.py`（或直接双击 `start.bat`）。
 
 打开：
 
@@ -238,6 +240,8 @@ OMP_NUM_THREADS=1 KMP_DUPLICATE_LIB_OK=TRUE .venv311/bin/python scripts/train_pu
 .venv311/bin/python scripts/run_demo_server.py
 ```
 
+> Windows 下改为：`python scripts\run_demo_server.py`。
+
 然后在浏览器打开：
 
 ```text
@@ -252,11 +256,12 @@ PYTHONPATH=src .venv311/bin/python -c "from csrc_rag.orchestration.intents impor
 
 ## 当前已有文档
 
-- 总体框架：[docs/项目总体框架.md](/Users/mindset/Desktop/深度学习大作业/docs/项目总体框架.md)
-- 执行与验证路线：[docs/执行路线与验证计划.md](/Users/mindset/Desktop/深度学习大作业/docs/执行路线与验证计划.md)
-- 检索策略与知识库设计：[docs/检索策略与知识库设计.md](/Users/mindset/Desktop/深度学习大作业/docs/检索策略与知识库设计.md)
-- 前端测试问题：[docs/前端测试问题.md](/Users/mindset/Desktop/深度学习大作业/docs/前端测试问题.md)
-- 本地模型接入与前端改版说明：[docs/本地模型接入与前端改版说明.md](/Users/mindset/Desktop/深度学习大作业/docs/本地模型接入与前端改版说明.md)
+- 总体框架：[docs/项目总体框架.md](docs/项目总体框架.md)
+- 执行与验证路线：[docs/执行路线与验证计划.md](docs/执行路线与验证计划.md)
+- 检索策略与知识库设计：[docs/检索策略与知识库设计.md](docs/检索策略与知识库设计.md)
+- 前端测试问题：[docs/前端测试问题.md](docs/前端测试问题.md)
+- 本地模型接入与前端改版说明：[docs/本地模型接入与前端改版说明.md](docs/本地模型接入与前端改版说明.md)
+- 微调方案（赛道 B 核心）：[docs/微调方案.md](docs/微调方案.md)
 
 ## 后续优先级
 
@@ -286,7 +291,7 @@ PYTHONPATH=src .venv311/bin/python -c "from csrc_rag.orchestration.intents impor
 - 训练和评估必须按 `EventID` 防泄漏切分，优先采用时间切分。
 - 第一版检索 benchmark 目前只是 sanity check，不代表最终跨案例相似检索效果，后续还需要人工标注评测集。
 - 当前已经有两条训练路径：
-  - `python3` 下的 `sklearn` baseline
-  - `.venv311` 下的 `transformers` 微调路径
-- 当前推荐所有“本地模型推理”命令都使用 `.venv311/bin/python`
+  - Windows Python 3.12 的 `sklearn` baseline
+  - Windows Python 3.12 的 `transformers` 微调路径
+- 当前推荐所有“本地模型推理”命令都使用 `python`（Python 3.12）
 - 当前前端已经适合第一轮人工验证，但回复模型质量和 dense 检索质量仍需继续优化

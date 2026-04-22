@@ -20,7 +20,7 @@ Turn the CSRC punishment project from planning into execution with:
 - A runnable agent-team workflow exists at `tools/agent_team_runner.py`.
 - A reusable project bootstrap script exists at `tools/bootstrap_codex_workspace.py`.
 - This workspace is now a git repository with `main` as the default branch and `origin` set to `git@github.com:Mindse-Tt/Deeplearning-Rag-Test.git`.
-- The current project input is [证监会处罚信息表.xlsx](/Users/mindset/Desktop/深度学习大作业/证监会处罚信息表.xlsx), which contains one visible sheet with 14,740 data rows and 24 actual fields despite broken Excel dimension metadata.
+- The current project input is [证监会处罚信息表.xlsx](证监会处罚信息表.xlsx), which contains one visible sheet with 14,740 data rows and 24 actual fields despite broken Excel dimension metadata.
 - The dataset mixes event-level text with party-level punishment rows: 14,740 rows map to 4,233 unique `EventID`s, and 2,109 events have multiple rows.
 - The user confirmed that the project should be framed in `RAG` mode rather than a generic knowledge-based pipeline.
 - `M` column (`Activity` / `违规行为`) is the primary evidence field and should be treated as the core retrieval and modeling text.

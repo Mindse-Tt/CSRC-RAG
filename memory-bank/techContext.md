@@ -29,7 +29,7 @@
 
 - Global MCP server name: `memory-bank`
 - Launch command:
-  `node /Users/mindset/Downloads/论文-IJPE 3/vendor/memory-bank-mcp/dist/index.js`
+  `node <memory-bank-mcp>/vendor/memory-bank-mcp/dist/index.js`
 - Memory Bank MCP was patched locally to auto-detect an existing `memory-bank/` folder from the current project directory.
 
 ## Important Constraints
