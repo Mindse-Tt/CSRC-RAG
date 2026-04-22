@@ -84,6 +84,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="For smoke-testing. Only encode first N chunks.",
     )
+    parser.add_argument(
+        "--cache-folder",
+        default="artifacts/models",
+        help="HuggingFace cache folder (kept out of git).",
+    )
     return parser.parse_args()
 
 
@@ -102,6 +107,7 @@ def encode_corpus(
     batch_size: int,
     device: str | None,
     max_seq_length: int,
+    cache_folder: str | None = None,
 ) -> np.ndarray:
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
@@ -111,8 +117,12 @@ def encode_corpus(
             "Install with: pip install sentence-transformers"
         ) from exc
 
-    LOGGER.info("Loading model %s", model_name)
-    model = SentenceTransformer(model_name, device=device)
+    LOGGER.info("Loading model %s (cache_folder=%s)", model_name, cache_folder)
+    model = SentenceTransformer(
+        model_name,
+        device=device,
+        cache_folder=cache_folder,
+    )
     model.max_seq_length = max_seq_length
 
     LOGGER.info("Encoding %d chunks (batch_size=%d)", len(texts), batch_size)
@@ -149,13 +159,19 @@ def main() -> None:
     if not doc_ids:
         raise SystemExit("No chunks found; aborting.")
 
+    import time as _time
+    t0 = _time.perf_counter()
+
     vectors = encode_corpus(
         texts=texts,
         model_name=args.model,
         batch_size=args.batch_size,
         device=args.device,
         max_seq_length=args.max_seq_length,
+        cache_folder=args.cache_folder,
     )
+
+    build_time_s = round(_time.perf_counter() - t0, 2)
 
     if vectors.shape[0] != len(doc_ids):
         raise RuntimeError(
@@ -163,6 +179,13 @@ def main() -> None:
         )
 
     write_artifacts(args.output_npy, args.output_order, doc_ids, vectors)
+
+    # Resolve device actually used (sentence-transformers may auto-select).
+    try:
+        import torch  # type: ignore
+        resolved_device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    except Exception:  # pragma: no cover
+        resolved_device = args.device or "cpu"
 
     summary = {
         "backend": "bge_prebuilt",
@@ -172,8 +195,13 @@ def main() -> None:
         "npy_path": str(args.output_npy.relative_to(PROJECT_ROOT)),
         "order_path": str(args.output_order.relative_to(PROJECT_ROOT)),
         "normalized": True,
+        "build_time_s": build_time_s,
+        "num_chunks": len(doc_ids),
+        "batch_size": args.batch_size,
+        "device": resolved_device,
+        "max_seq_length": args.max_seq_length,
         "query_instruction": "为这个句子生成表示以用于检索相关文章：",
-        "note": "Configure configs/models.json -> dense_retrieval.prebuilt to point here.",
+        "note": "Configure configs/models.json -> dense_retrieval.bge_small_zh to point here.",
     }
     summary_path = PROCESSED_DIR / "dense_index_summary_bge.json"
     summary_path.write_text(

@@ -178,3 +178,96 @@ class SentenceTransformerDenseEncoder(DenseEncoder):
                 break
         return ranked
 
+
+class BgeZhDenseEncoder(DenseEncoder):
+    """Chinese dense retrieval backed by ``BAAI/bge-small-zh-v1.5``.
+
+    Loads a pre-built L2-normalised ``.npy`` corpus matrix built by
+    ``scripts/build_dense_index_bge.py`` and encodes queries on the fly using
+    the same bge model (same vector space → cosine similarity = dot product).
+
+    The bge family recommends prefixing **queries only** with a short
+    instruction (``为这个句子生成表示以用于检索相关文章：``) which improves
+    retrieval quality for retrieval tasks. The corpus is NOT prefixed.
+    """
+
+    def __init__(
+        self,
+        npy_path: str | Path,
+        order_path: str | Path,
+        model_name: str = "BAAI/bge-small-zh-v1.5",
+        model_cache_folder: str | Path | None = None,
+        query_instruction: str = "为这个句子生成表示以用于检索相关文章：",
+        device: str | None = None,
+        max_seq_length: int = 512,
+    ) -> None:
+        self.npy_path = Path(npy_path)
+        self.order_path = Path(order_path)
+        self.model_name = model_name
+        self.model_cache_folder = str(model_cache_folder) if model_cache_folder else None
+        self.query_instruction = query_instruction
+        self.device = device
+        self.max_seq_length = max_seq_length
+        self.doc_ids: list[str] = []
+        self.doc_vectors: np.ndarray | None = None
+        self._encoder = None
+
+    def _ensure_encoder(self) -> None:
+        if self._encoder is not None:
+            return
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError(
+                "sentence-transformers is required for BgeZhDenseEncoder."
+            ) from exc
+
+        resolved_device = self.device
+        if resolved_device is None:
+            try:
+                import torch  # type: ignore
+                resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
+            except Exception:  # pragma: no cover
+                resolved_device = "cpu"
+
+        self._encoder = SentenceTransformer(
+            self.model_name,
+            device=resolved_device,
+            cache_folder=self.model_cache_folder,
+        )
+        self._encoder.max_seq_length = self.max_seq_length
+
+    def fit(self, doc_ids: Sequence[str], texts: Sequence[str]) -> None:
+        """Load pre-built embeddings from disk. doc_ids/texts are ignored."""
+        with self.order_path.open(encoding="utf-8") as fh:
+            self.doc_ids = json.load(fh)
+        self.doc_vectors = np.load(str(self.npy_path)).astype(np.float32)
+        if len(self.doc_ids) != self.doc_vectors.shape[0]:
+            raise ValueError(
+                f"BgeZhDenseEncoder: doc_ids length {len(self.doc_ids)} != "
+                f"embeddings rows {self.doc_vectors.shape[0]}"
+            )
+
+    def search(self, query: str, top_k: int, allowed_doc_ids: set[str] | None = None) -> list[DenseHit]:
+        if self.doc_vectors is None:
+            raise RuntimeError("BgeZhDenseEncoder is not fitted.")
+        self._ensure_encoder()
+        text = f"{self.query_instruction}{query}" if self.query_instruction else query
+        q_vec = np.asarray(
+            self._encoder.encode([text], normalize_embeddings=True)[0],  # type: ignore[union-attr]
+            dtype=np.float32,
+        )
+        scores = self.doc_vectors @ q_vec
+        ranked: list[DenseHit] = []
+        for idx in np.argsort(scores)[::-1]:
+            doc_id = self.doc_ids[idx]
+            if allowed_doc_ids is not None and doc_id not in allowed_doc_ids:
+                continue
+            score = float(scores[idx])
+            if score <= 0.0:
+                break
+            ranked.append(DenseHit(doc_id=doc_id, score=score))
+            if len(ranked) >= top_k:
+                break
+        return ranked
+
