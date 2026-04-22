@@ -5,13 +5,14 @@
     "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
     "fallback_base_model": "Qwen/Qwen2.5-0.5B-Instruct",
     "data_version": "rag_qa_train_v1",
-    "seed": 42
+    "seed": 42,
+    "_note": "Turing (RTX 2060S) fp16 adaptation — bf16 unsupported on Turing; batch/accum re-tuned for 8GB VRAM"
   },
   "quantization": {
     "load_in_4bit": true,
     "bnb_4bit_quant_type": "nf4",
     "bnb_4bit_use_double_quant": true,
-    "bnb_4bit_compute_dtype": "bfloat16"
+    "bnb_4bit_compute_dtype": "float16"
   },
   "lora": {
     "r": 16,
@@ -31,9 +32,9 @@
   },
   "training": {
     "output_dir": "artifacts/models/qwen_lora_csrc",
-    "per_device_train_batch_size": 4,
-    "per_device_eval_batch_size": 4,
-    "gradient_accumulation_steps": 4,
+    "per_device_train_batch_size": 2,
+    "per_device_eval_batch_size": 2,
+    "gradient_accumulation_steps": 8,
     "learning_rate": 2e-4,
     "num_train_epochs": 3,
     "max_seq_length": 2048,
@@ -51,7 +52,8 @@
     "load_best_model_at_end": true,
     "metric_for_best_model": "eval_loss",
     "greater_is_better": false,
-    "bf16": true,
+    "bf16": false,
+    "fp16": true,
     "fp16_fallback": true,
     "packing": false,
     "report_to": ["tensorboard"],

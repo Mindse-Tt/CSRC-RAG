@@ -240,8 +240,9 @@ def train(
         load_best_model_at_end=cfg.training["load_best_model_at_end"] and val_ds is not None,
         metric_for_best_model=cfg.training["metric_for_best_model"],
         greater_is_better=cfg.training["greater_is_better"],
-        bf16=cfg.training["bf16"] and torch.cuda.is_bf16_supported() if torch.cuda.is_available() else False,
-        fp16=(not torch.cuda.is_bf16_supported()) if torch.cuda.is_available() else False,
+        # Turing (RTX 2060S) fp16 adaptation — bf16 unsupported on Turing, fall back to fp16.
+        bf16=bool(cfg.training.get("bf16", False)) and torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
+        fp16=bool(cfg.training.get("fp16", True)) and torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),
         report_to=cfg.training["report_to"],
         seed=cfg.training["seed"],
     )

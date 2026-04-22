@@ -41,13 +41,13 @@
 
 | 超参 | 推荐值 | 理由 |
 |------|-------|------|
-| `quantization` | NF4 + double_quant + bnb_4bit_compute_dtype=bfloat16 | QLoRA 论文标准设置，T4 bf16 勉强，P100 fp16 更稳；显存从 ~6GB 压到 ~1.5GB |
+| `quantization` | NF4 + double_quant + bnb_4bit_compute_dtype=bfloat16（Colab T4）/ float16（本机 RTX 2060S Turing） | QLoRA 论文标准设置，T4 bf16 勉强，P100 fp16 更稳；Turing (2060S/2070/2080) 硬件不支持 bf16，本机必须用 fp16；显存从 ~6GB 压到 ~1.5GB |
 | `lora_r` | **16** | 1.5B 参数量下 r=8 偏小、r=32 过拟合；r=16 在 5.5k 样本量上经验最佳 |
 | `lora_alpha` | **32** | 惯例 α = 2·r；等效学习率放大 2 倍，配合 lr=2e-4 稳定 |
 | `lora_dropout` | **0.05** | 样本量小、有模板，加 dropout 避免 LoRA 过拟模板句式；>0.1 会掉 ROUGE |
 | `target_modules` | `q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj` | Qwen 所有线性层；不做 MLP-only / Attn-only，避免老师追问"为什么不全层 LoRA" |
-| `batch_size` (per device) | **4** | seq=2048 时 T4 显存极限；大了 OOM |
-| `grad_accum` | **4** | 有效 batch=16，配 lr=2e-4 是 QLoRA 通用甜点 |
+| `batch_size` (per device) | **4**（Colab T4）/ **2**（本机 2060S 8GB） | seq=2048 时 T4 显存极限；2060S 8GB 需降到 2；大了 OOM |
+| `grad_accum` | **4**（Colab T4）/ **8**（本机 2060S） | 保持有效 batch=16 不变，配 lr=2e-4 是 QLoRA 通用甜点 |
 | `learning_rate` | **2e-4** | QLoRA 论文标准值；比全参微调 lr 大一个数量级 |
 | `num_train_epochs` | **3** | 1 epoch 欠拟、5 epoch 过拟模板；3 epoch 是实测拐点 |
 | `max_seq_length` | **2048** | 证据拼完 2–4 条 case 通常在 1200–1700 tokens，留余量 |
