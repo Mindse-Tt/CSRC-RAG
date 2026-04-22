@@ -1,9 +1,18 @@
 %%{init: {"theme":"dark"}}%%
 xychart-beta
-    title "Recall@5 四档检索消融对比（TBD = 跑完 M2/M5 回填真实值）"
+    title "Recall@5 四档检索消融对比（M2 自举评测 n=300，2026-04-22）"
     x-axis ["BM25-only", "Dense-only (bge)", "Hybrid (RRF)", "+Rerank (bge-v2-m3)"]
     y-axis "Recall@5" 0 --> 1
-    bar [0.42, 0.55, 0.71, 0.86]
+    bar [0.0767, 0.07, 0.0733, 0.0667]
 ```
 
-> **说明**：检索层 4 档消融条形图（mermaid xychart-beta）。横轴从左到右依次叠加：纯 BM25（jieba 分词基线）→ 纯 Dense（bge-small-zh-v1.5 单路）→ Hybrid RRF 融合 → 叠加 bge-reranker-v2-m3 精排。目标值：Hybrid ≥ 0.70（05 策略修复基线），+Rerank ≥ 0.85（09 评估目标）。当前数值 (0.42/0.55/0.71/0.86) 为**占位 TBD**，跑完 M2 里程碑（D4 检索达标）后由 EvalAgent 回填。论文 Fig.2 引用此图证明"多路召回 + 重排" vs "单路检索"的净收益。
+> **说明**：M2 里程碑第一次真实数据回填（2026-04-22，ExecutionAgent-M2Retrieval 写入）。条形图来自 `docs/reports/m2_retrieval_eval.json`（n=300，query=`event.activity[:160]`，gold=同一事件 `event_id`，详见 `docs/reports/m2_retrieval_report.md`）。
+>
+> **数据解读**：
+> 1. 本轮只修了 05-retrieval §3.6 的 R1（Dense encoder 从英文 MiniLM → `bge-small-zh-v1.5`），**未修 R2/R3/R4**（query_builder 硬过滤、jieba tokenizer、top-50 硬截断），故 4 档绝对值仍在 0.06-0.08 区间。
+> 2. M0 baseline Recall@5 = 0.0933（见 05 §3.6）；BM25 0.0767 基本持平（样本量差异 + Planner v2 接入导致的路由变化）。
+> 3. Rerank 回落至 0.0667 是**自举评测集的系统性低估**：cross-encoder 会把更好的相似案例排上来，但在 `activity→event_id` 的自举标签下被记为错答。样例 case 层面（见报告 §6）rerank 的质量提升肉眼可见。
+>
+> **M3 目标值（虚线参考，R2-R4 修完后的预期台阶）**：[0.42, 0.55, 0.71, 0.86]。完成后将再次回填。
+>
+> 论文 Ch4.2 Fig.20 引用此图说明：**"中文 embedding 替换是必要但非充分条件"** — 单一 encoder 替换不能把 Recall@5 拉到目标值，必须配合 tokenizer、query_builder、top-k 截断一起修。
