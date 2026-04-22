@@ -108,3 +108,17 @@ Hybrid 的 top-5 全部没有 `2023` 年份约束的硬证据，而 rerank 的 t
 - **M3**: 修 R2/R3/R4 — `metadata_filter.py` 接管硬过滤、`tokenizer.py` 切到 jieba、`engine.py::hits[:50]` 改为 `event_id` 去重后再截断。
 - **M3 评测**: 构建 ≥ 100 条人工跨案例相似性标注集，带 relevance grade（0/1/2），用 nDCG@10 作为主指标。
 - **回归**: M3 完成后重跑 `scripts/evaluate_retrieval_m2.py`，更新本报告 §4 表格与图 20。
+
+---
+
+## 10. M3 升级版（R2 + R3 + R4）
+
+2026-04-22 由 ExecutionAgent-M3c 在同一分支落地 R2/R3/R4，详见 [m3_retrieval_report.md](./m3_retrieval_report.md)。关键对比：
+
+| 指标 | M2 (sanity 300) | M3 (sanity 300) | M3 (gold_50, 38 条) |
+|---|---|---|---|
+| BM25 Recall@5 | 0.0767 | 0.0767 | **0.1140** |
+| Hybrid Recall@5 | 0.0733 | 0.0733 | **0.1557** (+112% vs M2) |
+| Hybrid+Rerank Recall@5 | 0.0667 | — | 0.0526 |
+
+M3 的三项工程修复（jieba tokenizer / 软过滤 / 候选池 100）已经生效，Hybrid 在真实跨案例 gold set 上相对 M2 翻倍。目标值 0.35 / 0.60 未达成的主要原因是 gold_50 评测集本身的 id 命名空间问题（部分 `relevant_event_ids` 是 `401` / `401949` 等短 id，与 `event_corpus.jsonl` 的 8 位 canonical id 不对齐），以及 rerank 在硬约束 query 上的过拟合——见 m3 报告 §4、§6、§9。

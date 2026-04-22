@@ -1,0 +1,51 @@
+{
+  "config": {
+    "limit": 200,
+    "dataset": "gold (gold_50.jsonl)",
+    "skip": [],
+    "tested_total": 38,
+    "eval_path": "data\\eval\\gold_50.jsonl"
+  },
+  "results": [
+    {
+      "label": "bm25",
+      "tested_queries": 38,
+      "Recall@5": 0.114,
+      "Hit@5": 0.1842,
+      "MRR": 0.1704,
+      "nDCG@10": 0.1258,
+      "latency_total_s": 3.85,
+      "latency_per_query_ms": 101.3
+    },
+    {
+      "label": "dense_bge",
+      "tested_queries": 38,
+      "Recall@5": 0.068,
+      "Hit@5": 0.1579,
+      "MRR": 0.1485,
+      "nDCG@10": 0.087,
+      "latency_total_s": 62.07,
+      "latency_per_query_ms": 1633.3
+    },
+    {
+      "label": "hybrid_rrf",
+      "tested_queries": 38,
+      "Recall@5": 0.1557,
+      "Hit@5": 0.2895,
+      "MRR": 0.1611,
+      "nDCG@10": 0.1329,
+      "latency_total_s": 8.71,
+      "latency_per_query_ms": 229.3
+    },
+    {
+      "label": "hybrid_rerank",
+      "tested_queries": 38,
+      "Recall@5": 0.0526,
+      "Hit@5": 0.1316,
+      "MRR": 0.0625,
+      "nDCG@10": 0.0571,
+      "latency_total_s": 61.24,
+      "latency_per_query_ms": 1611.7
+    }
+  ]
+}

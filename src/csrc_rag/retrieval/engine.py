@@ -8,6 +8,7 @@ from typing import Any
 
 from csrc_rag.orchestration.intent_model import load_intent_classifier
 from csrc_rag.orchestration.intents import IntentDecision, IntentSpec, load_registry, route_query
+from csrc_rag.orchestration.slot_filler import extract_slots
 from csrc_rag.orchestration.topic_guard import is_out_of_scope
 from csrc_rag.retrieval.bm25 import BM25Index
 from csrc_rag.retrieval.dense import (
@@ -17,6 +18,7 @@ from csrc_rag.retrieval.dense import (
     SvdTfidfDenseEncoder,
 )
 from csrc_rag.retrieval.hybrid import reciprocal_rank_fusion
+from csrc_rag.retrieval.metadata_filter import MetadataFilter
 from csrc_rag.retrieval.query_builder import QueryPlan, build_query_plan
 from csrc_rag.retrieval.reranker import RerankConfig, Reranker, RrfCandidate
 from csrc_rag.response.responder import build_responder
@@ -124,6 +126,33 @@ class RetrievalEngine:
         )
         self.index.fit([(row["chunk_id"], row["retrieval_text"]) for row in self.chunks])
         self.retrieval_config = retrieval_config
+
+        # --- Hybrid candidate-pool config (R4 fix) --------------------------
+        #
+        # Prefer the new ``retrieval.json::hybrid`` block; fall back to the
+        # legacy ``models.json::hybrid_retrieval`` for backward compatibility
+        # when the block is missing (ablation / older configs).
+        hybrid_cfg = retrieval_config.get("hybrid") or {}
+        legacy_hybrid = self.model_config.get("hybrid_retrieval", {}) or {}
+        self.bm25_top = int(hybrid_cfg.get("bm25_top", legacy_hybrid.get("candidate_pool", 100)))
+        self.dense_top = int(hybrid_cfg.get("dense_top", legacy_hybrid.get("candidate_pool", 100)))
+        self.rrf_k = int(hybrid_cfg.get("rrf_k", legacy_hybrid.get("rrf_k", 60)))
+        self.final_top_k_chunks = int(hybrid_cfg.get("final_top_k", 8))
+
+        # --- Metadata soft-filter (R2 fix) ----------------------------------
+        #
+        # Build the filter once over the full chunk corpus so each query only
+        # pays the slot-extraction cost. The confidence threshold controls
+        # the slot→hard-filter promotion boundary (slots whose confidence
+        # sits below the threshold become BM25 boost hints instead of hard
+        # filters).
+        meta_cfg = retrieval_config.get("metadata_filter") or {}
+        self.metadata_filter_enabled = bool(meta_cfg.get("enabled", True))
+        self.metadata_filter = MetadataFilter.from_chunks(
+            self.chunks,
+            min_allowed_fallback=int(meta_cfg.get("min_allowed_fallback", 20)),
+            slot_confidence_threshold=float(meta_cfg.get("confidence_threshold", 0.7)),
+        )
         self.dense_encoder = None
         if self.retrieval_mode in {"dense", "hybrid"}:
             self.dense_encoder = self._build_dense_encoder()
@@ -253,6 +282,100 @@ class RetrievalEngine:
             allowed.add(chunk["chunk_id"])
         return allowed
 
+    # ------------------------------------------------------------------
+    # R2: slot-aware soft metadata filter
+    # ------------------------------------------------------------------
+    def _compute_allowed_doc_ids(
+        self, query: str, query_plan: QueryPlan
+    ) -> tuple[set[str] | None, dict[str, Any]]:
+        """Compute allowed chunk ids using (a) query_plan regex filters and
+        (b) slot_filler + MetadataFilter soft/hard gating.
+
+        High-confidence slots (year / violation_type / org ≥ threshold) produce
+        a hard filter via :class:`MetadataFilter`. Low-confidence slots become
+        boost hints consumed by later layers. If the filter would empty the
+        candidate pool (< ``min_allowed_fallback``), we degrade to "no
+        restriction" and the ranker falls back to lexical/semantic scoring
+        alone — this is the R2 "soft" behaviour that M2b was missing.
+
+        Returns
+        -------
+        (allowed_ids, diagnostics)
+            ``allowed_ids`` is ``None`` when no restriction should be
+            applied. ``diagnostics`` carries the MetadataFilter decision
+            for downstream observability.
+        """
+        diagnostics: dict[str, Any] = {"used": False}
+
+        if not self.metadata_filter_enabled:
+            # Metadata filter toggled off entirely — retain legacy regex path.
+            return self._allowed_doc_ids(query_plan), diagnostics
+
+        slots, sources = extract_slots(query)
+        # Derive a coarse confidence per slot: dict/regex→0.85, ner-stub→0.55.
+        # This matches the "0.7 threshold → hard filter" contract in §3 of
+        # 05-retrieval-strategy.md.
+        confidence_by_source = {"regex": 0.85, "dict": 0.85, "ner": 0.55, "none": 0.0}
+        slot_confidence = {
+            name: confidence_by_source.get(src, 0.5) for name, src in sources.items()
+        }
+
+        # The MetadataFilter only knows scalar slot values; slot_filler
+        # returns lists. Pick the first element as the representative value
+        # (full "any-of" semantics can be added later without changing the
+        # contract). Normalise year to a 4-char string to match chunk.year.
+        scalar_slots: dict[str, Any] = {}
+        raw_year = slots.get("year")
+        if isinstance(raw_year, list) and raw_year:
+            scalar_slots["year"] = str(raw_year[0])
+        elif raw_year is not None and not isinstance(raw_year, list):
+            scalar_slots["year"] = str(raw_year)
+        raw_vt = slots.get("violation_type")
+        if isinstance(raw_vt, list) and raw_vt:
+            scalar_slots["violation_type"] = str(raw_vt[0])
+        elif raw_vt is not None and not isinstance(raw_vt, list):
+            scalar_slots["violation_type"] = str(raw_vt)
+        # Institution ("证监会") matches almost every row in the corpus,
+        # so we treat it as a soft hint rather than a hard filter to avoid
+        # collapsing the pool for every regulator-mentioning query.
+        inst = slots.get("institution")
+        if isinstance(inst, list) and inst:
+            scalar_slots["company"] = str(inst[0])  # routed to boost hints
+        elif inst is not None and not isinstance(inst, list):
+            scalar_slots["company"] = str(inst)
+        confidence_for_filter = {
+            "year": slot_confidence.get("year", 0.0),
+            "violation_type": slot_confidence.get("violation_type", 0.0),
+            "org": 0.0,  # force org to soft path
+        }
+
+        decision = self.metadata_filter.apply(
+            slots=scalar_slots,
+            slot_confidence=confidence_for_filter,
+        )
+        diagnostics = {
+            "used": True,
+            "applied": decision.applied_filters,
+            "boost_hints": decision.boost_hints,
+            "fallback": decision.fallback,
+            **decision.diagnostics,
+        }
+
+        # Merge with legacy regex-based filters (query_plan) so explicit cues
+        # like "证监会" / "上市公司" still narrow the pool when slot_filler
+        # misses them.
+        legacy_allowed = self._allowed_doc_ids(query_plan)
+        if decision.allowed_doc_ids is None:
+            return legacy_allowed, diagnostics
+        if legacy_allowed is None:
+            return decision.allowed_doc_ids, diagnostics
+        merged = decision.allowed_doc_ids & legacy_allowed
+        # Degrade if intersection is too small (protect recall).
+        if len(merged) < 20:
+            diagnostics["intersection_fallback"] = True
+            return decision.allowed_doc_ids, diagnostics
+        return merged, diagnostics
+
     def _planner_v2_early_exit(self, query: str) -> SearchResponse | None:
         """Short-circuit greeting / chitchat / out_of_scope predictions.
 
@@ -322,7 +445,7 @@ class RetrievalEngine:
             intent_decision = route_query(query, self.registry)
         intent = intent_decision.spec
         query_plan = build_query_plan(query, intent)
-        allowed = self._allowed_doc_ids(query_plan)
+        allowed, allowed_diag = self._compute_allowed_doc_ids(query, query_plan)
         hits = self._search_chunks(query, allowed_doc_ids=allowed)
 
         # Optional cross-encoder rerank (L3 tail).
@@ -356,7 +479,11 @@ class RetrievalEngine:
 
         grouped_scores: dict[str, float] = defaultdict(float)
         grouped_snippets: dict[str, list[str]] = defaultdict(list)
-        for hit in hits[:50]:
+        # R4 fix: widen the chunk-level truncation from 50 to max(bm25_top,
+        # dense_top) so that event-level dedup sees the full fused pool.
+        # With bm25_top=dense_top=100 this becomes 100.
+        chunk_pool_size = max(self.bm25_top, self.dense_top, 100)
+        for hit in hits[:chunk_pool_size]:
             chunk = self.chunk_by_id[hit.doc_id]
             event_id = chunk["event_id"]
             grouped_scores[event_id] = max(grouped_scores[event_id], hit.score)
@@ -423,21 +550,31 @@ class RetrievalEngine:
         )
 
     def _search_chunks(self, query: str, allowed_doc_ids: set[str] | None) -> list:
-        candidate_pool = self.model_config["hybrid_retrieval"]["candidate_pool"]
+        # R4 fix: widen the BM25 / Dense candidate lists before RRF so the
+        # fusion sees more overlap. The new default is 100 each (was 50 in
+        # M2); configurable via ``retrieval.json::hybrid``.
         if self.retrieval_mode == "bm25":
             return self.index.score(query, allowed_doc_ids=allowed_doc_ids)
         if self.retrieval_mode == "dense":
-            return self.dense_encoder.search(query, top_k=candidate_pool, allowed_doc_ids=allowed_doc_ids)
+            return self.dense_encoder.search(
+                query, top_k=self.dense_top, allowed_doc_ids=allowed_doc_ids
+            )
         if self.retrieval_mode == "hybrid":
-            bm25_hits = self.index.score(query, allowed_doc_ids=allowed_doc_ids)[:candidate_pool]
-            dense_hits = self.dense_encoder.search(query, top_k=candidate_pool, allowed_doc_ids=allowed_doc_ids)
+            bm25_hits = self.index.score(query, allowed_doc_ids=allowed_doc_ids)[: self.bm25_top]
+            dense_hits = self.dense_encoder.search(
+                query, top_k=self.dense_top, allowed_doc_ids=allowed_doc_ids
+            )
+            # Candidate pool after RRF: use max(bm25_top, dense_top) so the
+            # fused list does not truncate early; the event-level dedup in
+            # ``search()`` applies the final top-k.
+            fused_pool = max(self.bm25_top, self.dense_top)
             fused = reciprocal_rank_fusion(
                 [
                     [(hit.doc_id, hit.score) for hit in bm25_hits],
                     [(hit.doc_id, hit.score) for hit in dense_hits],
                 ],
-                top_k=candidate_pool,
-                rrf_k=self.model_config["hybrid_retrieval"]["rrf_k"],
+                top_k=fused_pool,
+                rrf_k=self.rrf_k,
             )
             return [type("HybridHit", (), {"doc_id": doc_id, "score": score}) for doc_id, score in fused]
         raise ValueError(f"Unsupported retrieval_mode: {self.retrieval_mode}")

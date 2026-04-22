@@ -34,8 +34,8 @@
     "model_cache_folder": "artifacts/models",
     "max_length": 512,
     "batch_size": 16,
-    "candidate_pool_max": 60,
-    "final_top_k_events": 6,
+    "candidate_pool_max": 100,
+    "final_top_k_events": 10,
     "device": "auto",
     "use_fp16": true
   },
