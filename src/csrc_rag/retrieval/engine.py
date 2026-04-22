@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Any
 
 from csrc_rag.orchestration.intent_model import load_intent_classifier
 from csrc_rag.orchestration.intents import IntentDecision, IntentSpec, load_registry, route_query
+from csrc_rag.orchestration.rewriter import rewrite as rewrite_query
 from csrc_rag.orchestration.slot_filler import extract_slots
 from csrc_rag.orchestration.topic_guard import is_out_of_scope
 from csrc_rag.retrieval.bm25 import BM25Index
@@ -376,6 +378,94 @@ class RetrievalEngine:
             return decision.allowed_doc_ids, diagnostics
         return merged, diagnostics
 
+    # ------------------------------------------------------------------
+    # M3e-A: multi-constraint query expansion
+    # ------------------------------------------------------------------
+    # Conjunctions that signal "the user wants cases matching all of
+    # these clauses" — e.g. "违规担保 与 信息披露违规". When we see one
+    # of these we generate sub-queries so each branch can be retrieved
+    # independently and then rank-fused. A single-pass BM25 over the
+    # conjoined query tends to over-weight whichever clause has higher
+    # IDF and push the other out.
+    _CONJUNCTIONS = ("同时", "以及", " 且 ", "，且", "以及", "并", " 和 ")
+    _CONJUNCTION_SPLIT = re.compile(r"同时|以及|且|并|与|和")
+
+    def _expand_to_subqueries(
+        self, query: str, intent_name: str, history: list[dict[str, str]] | None
+    ) -> tuple[list[str], dict[str, Any]]:
+        """Return ``([canonical + optional subqueries + synonym variants], diag)``.
+
+        The canonical query is always index 0. Sub-queries are added
+        when we see:
+          1. Multiple violation_type slots on the same utterance (the
+             strongest multi-hop signal — "违规担保 + 信披违规").
+          2. An explicit conjunction ("同时"/"以及"/"且"/"并" between two
+             short clauses that each contain a domain keyword).
+        Synonym expansions produced by ``rewriter.rewrite`` are always
+        appended so BM25 can match alias→canonical forms.
+
+        Each sub-query is a lightweight variant: we *do not* re-run the
+        full planner per sub-query. That's the right trade-off here —
+        the goal is widening BM25/Dense candidate coverage, not
+        executing a second end-to-end pipeline.
+        """
+        diag: dict[str, Any] = {
+            "canonical": query,
+            "sub_queries": [],
+            "synonym_variants": [],
+            "reason": None,
+        }
+        variants: list[str] = [query]
+
+        rewrite_out = rewrite_query(query, history=history or [], intent=intent_name)
+        diag["canonical"] = rewrite_out.canonical_query
+        if rewrite_out.canonical_query != query:
+            variants.append(rewrite_out.canonical_query)
+
+        # 1. Multiple violation_type → one sub-query per type, each keeps
+        #    the rest of the query intact so BM25 still weighs year /
+        #    company mentions.
+        vtypes = rewrite_out.slots.get("violation_type") or []
+        if isinstance(vtypes, list) and len(vtypes) >= 2:
+            diag["reason"] = "multi_violation_type"
+            remainder = rewrite_out.canonical_query
+            for vt in vtypes:
+                # Prepend the specific violation_type; the full canonical
+                # stays so year/party-role signals survive.
+                sub = f"{vt} {remainder}"
+                if sub not in variants:
+                    variants.append(sub)
+                    diag["sub_queries"].append(sub)
+
+        # 2. Conjunction split: if the user wrote "A 且 B" or "A 同时 B"
+        #    and each side is non-trivial (>= 4 characters with at least
+        #    one CJK char), push both sides as separate sub-queries.
+        #    This catches cases like "独董内幕交易 + 短线交易" that slot
+        #    filler might miss because only one canonical violation_type
+        #    word appears.
+        if diag["reason"] is None and any(c in query for c in self._CONJUNCTIONS):
+            parts = [p.strip() for p in self._CONJUNCTION_SPLIT.split(query) if p.strip()]
+            parts = [
+                p
+                for p in parts
+                if len(p) >= 4 and re.search(r"[\u4e00-\u9fa5]", p)
+            ]
+            if len(parts) >= 2:
+                diag["reason"] = "conjunction_split"
+                for p in parts[:3]:  # cap at 3 sub-clauses
+                    if p not in variants:
+                        variants.append(p)
+                        diag["sub_queries"].append(p)
+
+        # Synonym variants (alias → canonical) — always append, cheap.
+        for exp in rewrite_out.synonyms_expanded[:3]:
+            if exp not in variants:
+                variants.append(exp)
+                diag["synonym_variants"].append(exp)
+
+        # Cap total at 5 to bound cost.
+        return variants[:5], diag
+
     def _planner_v2_early_exit(self, query: str) -> SearchResponse | None:
         """Short-circuit greeting / chitchat / out_of_scope predictions.
 
@@ -446,7 +536,45 @@ class RetrievalEngine:
         intent = intent_decision.spec
         query_plan = build_query_plan(query, intent)
         allowed, allowed_diag = self._compute_allowed_doc_ids(query, query_plan)
-        hits = self._search_chunks(query, allowed_doc_ids=allowed)
+
+        # M3e-A: multi-query expansion. For single-clause questions the
+        # variant list is just ``[canonical]`` and the behaviour is
+        # identical to before. For multi-violation-type / conjunction
+        # queries we retrieve once per variant and rank-fuse the chunk
+        # lists with RRF so gold events only covered by one branch still
+        # surface.
+        #
+        # Ablation switch: set ``CSRC_RAG_DISABLE_SUBQUERIES=1`` to keep
+        # the single-pass behaviour (used for paper Ch4.2 ablation table).
+        import os
+        if os.environ.get("CSRC_RAG_DISABLE_SUBQUERIES") == "1":
+            variants = [query]
+            expand_diag = {"canonical": query, "sub_queries": [], "synonym_variants": [], "reason": "disabled"}
+        else:
+            variants, expand_diag = self._expand_to_subqueries(
+                query, intent.name, history
+            )
+        if len(variants) == 1:
+            hits = self._search_chunks(variants[0], allowed_doc_ids=allowed)
+        else:
+            per_query_hits: list[list] = []
+            for q in variants:
+                per_query_hits.append(self._search_chunks(q, allowed_doc_ids=allowed))
+            # Symmetric RRF over the per-sub-query chunk rankings. This
+            # is the same fusion used for BM25⊕Dense, just applied at
+            # the sub-query axis instead of the backend axis.
+            fused = reciprocal_rank_fusion(
+                [
+                    [(hit.doc_id, float(getattr(hit, "score", 0.0))) for hit in hs]
+                    for hs in per_query_hits
+                ],
+                top_k=max(self.bm25_top, self.dense_top, 100),
+                rrf_k=int(self.rrf_k),
+            )
+            hits = [
+                type("MultiQHit", (), {"doc_id": doc_id, "score": score})
+                for doc_id, score in fused
+            ]
 
         # Optional cross-encoder rerank (L3 tail).
         #
