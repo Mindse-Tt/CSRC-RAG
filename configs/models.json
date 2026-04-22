@@ -1,10 +1,19 @@
 {
   "dense_retrieval": {
-    "backend": "prebuilt",
+    "backend": "svd_tfidf",
+    "active_backend": "bge_small_zh",
     "prebuilt": {
       "npy_path": "data/processed/chunk_embeddings.npy",
       "order_path": "data/processed/chunk_id_order.json",
       "query_model": "sentence-transformers/all-MiniLM-L6-v2"
+    },
+    "bge_small_zh": {
+      "npy_path": "data/processed/chunk_embeddings_bge.npy",
+      "order_path": "data/processed/chunk_id_order_bge.json",
+      "model_name": "BAAI/bge-small-zh-v1.5",
+      "model_cache_folder": "artifacts/models",
+      "query_instruction": "为这个句子生成表示以用于检索相关文章：",
+      "max_seq_length": 512
     },
     "sentence_transformer_model": "BAAI/bge-small-zh-v1.5",
     "svd_tfidf": {
@@ -18,6 +27,18 @@
     "rrf_k": 60,
     "candidate_pool": 80
   },
+  "reranker": {
+    "enabled": false,
+    "model_name": "BAAI/bge-reranker-v2-m3",
+    "fallback_model_name": "BAAI/bge-reranker-base",
+    "model_cache_folder": "artifacts/models",
+    "max_length": 512,
+    "batch_size": 16,
+    "candidate_pool_max": 60,
+    "final_top_k_events": 6,
+    "device": "auto",
+    "use_fp16": true
+  },
   "fine_tuning": {
     "task": "punishment_type_multilabel",
     "baseline_model": "tfidf_logistic_regression",
@@ -28,8 +49,19 @@
     "num_train_epochs": 3
   },
   "intent_router": {
-    "backend": "tfidf_logistic_regression",
-    "artifact_path": "artifacts/intent_classifier/intent_model.pkl"
+    "backend": "tfidf_logistic_regression_v2",
+    "artifact_path": "artifacts/intent_classifier_v2/intent_model.pkl",
+    "schema_version": "v2",
+    "labels": [
+      "greeting",
+      "chitchat",
+      "out_of_scope",
+      "case_retrieval",
+      "law_grounding",
+      "sanction_recommendation",
+      "trend_analysis"
+    ],
+    "legacy_artifact_path": "artifacts/intent_classifier/intent_model.pkl"
   },
   "response_generation": {
     "backend": "template",

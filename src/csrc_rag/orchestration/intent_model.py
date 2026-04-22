@@ -26,6 +26,22 @@ class IntentPrediction:
     method: str
 
 
+@dataclass(frozen=True)
+class IntentPredictionV2:
+    """Prediction record emitted by the v2 (7-class) Planner classifier.
+
+    Kept as a distinct dataclass so the pickle schema stored under
+    ``artifacts/intent_classifier_v2/`` can be rehydrated without importing
+    the training script. Shares the same duck-typed shape as
+    ``IntentPrediction`` to remain compatible with downstream consumers.
+    """
+
+    name: str
+    confidence: float
+    scores: dict[str, float]
+    method: str
+
+
 class TfidfIntentClassifier:
     def __init__(self, vectorizer: TfidfVectorizer, classifier: LogisticRegression, labels: list[str]) -> None:
         self.vectorizer = vectorizer
@@ -50,6 +66,101 @@ class TfidfIntentClassifier:
             scores={key: round(value, 4) for key, value in scores.items()},
             method="tfidf_logistic_regression",
         )
+
+
+class TfidfIntentClassifierV2:
+    """V2 Planner classifier (7 classes): ``greeting / chitchat / out_of_scope
+    / case_retrieval / law_grounding / sanction_recommendation / trend_analysis``.
+
+    Mirrors :class:`TfidfIntentClassifier` so callers can treat both uniformly.
+    The class is re-declared here (not imported from the training script) so
+    the v2 pickle can be loaded by the serving layer without pulling in any
+    training-time dependencies.
+    """
+
+    def __init__(
+        self,
+        vectorizer: TfidfVectorizer,
+        classifier: LogisticRegression,
+        labels: list[str],
+    ) -> None:
+        self.vectorizer = vectorizer
+        self.classifier = classifier
+        self.labels = labels
+
+    def predict(self, query: str) -> IntentPrediction:
+        features = self.vectorizer.transform([query])
+        probabilities = self.classifier.predict_proba(features)[0]
+        scores = {
+            label: float(probability)
+            for label, probability in sorted(
+                zip(self.classifier.classes_, probabilities),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+        }
+        label = max(scores.items(), key=lambda item: item[1])[0]
+        return IntentPrediction(
+            name=label,
+            confidence=round(scores[label], 4),
+            scores={key: round(value, 4) for key, value in scores.items()},
+            method="tfidf_logistic_regression_v2",
+        )
+
+
+class _IntentV2Unpickler(pickle.Unpickler):
+    """Unpickler that rehydrates the v2 artifact regardless of origin module.
+
+    The v2 pickle was produced by ``scripts/train_intent_classifier_v2.py`` and
+    references ``TfidfIntentClassifierV2`` / ``IntentPredictionV2`` under the
+    ``__main__`` (or training script) module. At serving time neither module is
+    importable, so we map those names onto the local re-declarations above.
+    """
+
+    _SHIMS = {
+        "TfidfIntentClassifierV2": TfidfIntentClassifierV2,
+        "IntentPredictionV2": IntentPredictionV2,
+        "TfidfIntentClassifier": TfidfIntentClassifier,
+        "IntentPrediction": IntentPrediction,
+    }
+
+    def find_class(self, module: str, name: str) -> Any:  # type: ignore[override]
+        if name in self._SHIMS:
+            return self._SHIMS[name]
+        return super().find_class(module, name)
+
+
+def _load_model_config() -> dict[str, Any]:
+    config_path = CONFIG_DIR / "models.json"
+    if not config_path.exists():
+        return {}
+    try:
+        return json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _resolve_artifact_path(explicit: str | Path | None) -> Path:
+    """Resolve the intent artifact path, honouring ``configs/models.json``.
+
+    Priority: explicit caller argument > ``intent_router.artifact_path`` in
+    models.json > legacy v1 default. This keeps the serving side configurable
+    without editing Python sources.
+    """
+    if explicit:
+        candidate = Path(explicit)
+        if not candidate.is_absolute():
+            candidate = (CONFIG_DIR.parent / candidate).resolve()
+        return candidate
+
+    cfg = _load_model_config().get("intent_router", {}) or {}
+    raw = cfg.get("artifact_path")
+    if raw:
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            candidate = (CONFIG_DIR.parent / candidate).resolve()
+        return candidate
+    return DEFAULT_INTENT_ARTIFACT
 
 
 def load_examples(path: str | Path | None = None) -> tuple[list[str], list[str]]:
@@ -118,9 +229,24 @@ def train_intent_classifier(
     return report
 
 
-def load_intent_classifier(path: str | Path | None = None) -> TfidfIntentClassifier | None:
-    model_path = Path(path) if path else DEFAULT_INTENT_ARTIFACT
+def load_intent_classifier(
+    path: str | Path | None = None,
+) -> TfidfIntentClassifier | TfidfIntentClassifierV2 | None:
+    """Load either the v1 or v2 intent-classifier pickle.
+
+    Behaviour:
+        * When ``path`` is given, load directly from that file (explicit win).
+        * Else read ``configs/models.json`` → ``intent_router.artifact_path``.
+        * Else fall back to the legacy v1 default.
+
+    V2 pickles were produced in the training script where the class lived in
+    ``__main__`` (or the ``train_intent_classifier_v2`` module). Those names
+    won't resolve at serving time, so :class:`_IntentV2Unpickler` shims them
+    onto the locally re-declared :class:`TfidfIntentClassifierV2`.
+    """
+    model_path = _resolve_artifact_path(path)
     if not model_path.exists():
         return None
     with model_path.open("rb") as handle:
-        return pickle.load(handle)
+        return _IntentV2Unpickler(handle).load()
+
