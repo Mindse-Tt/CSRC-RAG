@@ -1,0 +1,52 @@
+%%{init: {"theme":"dark"}}%%
+flowchart TD
+    COORD[👑 CoordinatorAgent<br/>策略合稿 / 冲突裁决]
+
+    COORD --> A00[📘 00-shared-context<br/>术语 / 术语表]
+    COORD --> A01[🚫 01-RejectAgent<br/>拒答 4 级]
+    COORD --> A02[📊 02-DataAgent<br/>切分 / 质量]
+    COORD --> A03[📦 03-RewriteAgent<br/>共指 / 同义]
+    COORD --> A04[🎯 04-PlannerAgent<br/>7 类意图]
+    COORD --> A05[🔎 05-RetrievalAgent<br/>双路 + RRF]
+    COORD --> A06[⚡ 06-RerankAgent<br/>bge-reranker]
+    COORD --> A07[🧠 07-ResponseAgent<br/>Prompt 模板]
+    COORD --> A08[🏋️ 08-LoRAAgent<br/>QLoRA SFT]
+    COORD --> A09[📈 09-EvalAgent<br/>三级评估]
+    COORD --> A10[🧰 10-ModelSelect<br/>基座/Emb/Rerank]
+    COORD --> A11[🛠️ 11-EngineeringAgent<br/>FastAPI / 前端]
+
+    %% 依赖关系
+    A02 --> A05
+    A02 --> A08
+    A02 --> A09
+    A03 --> A05
+    A04 --> A05
+    A04 --> A07
+    A05 --> A06
+    A06 --> A07
+    A07 --> A08
+    A08 --> A09
+    A10 --> A05
+    A10 --> A06
+    A10 --> A07
+    A10 --> A08
+    A01 --> A07
+    A01 --> A11
+    A07 --> A11
+    A09 --> A11
+
+    %% 可视化 Agent
+    VIZ[🎨 VisualizationAgent<br/>本文产出者]
+    VIZ -.消费所有策略.-> COORD
+
+    classDef coord fill:#7c2d12,stroke:#f97316,color:#fff
+    classDef core fill:#1e3a8a,stroke:#60a5fa,color:#fff
+    classDef eval fill:#064e3b,stroke:#34d399,color:#fff
+    classDef viz fill:#4c1d95,stroke:#a78bfa,color:#fff
+    class COORD coord
+    class A01,A02,A03,A04,A05,A06,A07,A08,A10,A11 core
+    class A09 eval
+    class VIZ viz
+```
+
+> **说明**：12 个 meta-agent 开发期依赖图。CoordinatorAgent 居中合稿 11 份策略文档，下游 12 个 agent 按功能分工。关键依赖链：Data(02) → Retrieval(05) → Rerank(06) → Response(07) → LoRA(08) → Eval(09) → Engineering(11)。ModelSelect(10) 横向输送基座决定给所有训练/推理 agent。VisualizationAgent（本文产出者）消费所有策略文档的 mermaid 源 + 指标，无反向依赖。当前阶段用户切"solo 模式"，Claude 代持全部 agent 角色串行执行。

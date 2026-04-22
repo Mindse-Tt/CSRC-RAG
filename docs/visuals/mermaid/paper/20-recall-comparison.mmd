@@ -1,0 +1,9 @@
+%%{init: {"theme":"dark"}}%%
+xychart-beta
+    title "Recall@5 四档检索消融对比（TBD = 跑完 M2/M5 回填真实值）"
+    x-axis ["BM25-only", "Dense-only (bge)", "Hybrid (RRF)", "+Rerank (bge-v2-m3)"]
+    y-axis "Recall@5" 0 --> 1
+    bar [0.42, 0.55, 0.71, 0.86]
+```
+
+> **说明**：检索层 4 档消融条形图（mermaid xychart-beta）。横轴从左到右依次叠加：纯 BM25（jieba 分词基线）→ 纯 Dense（bge-small-zh-v1.5 单路）→ Hybrid RRF 融合 → 叠加 bge-reranker-v2-m3 精排。目标值：Hybrid ≥ 0.70（05 策略修复基线），+Rerank ≥ 0.85（09 评估目标）。当前数值 (0.42/0.55/0.71/0.86) 为**占位 TBD**，跑完 M2 里程碑（D4 检索达标）后由 EvalAgent 回填。论文 Fig.2 引用此图证明"多路召回 + 重排" vs "单路检索"的净收益。
