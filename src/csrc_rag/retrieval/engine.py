@@ -449,6 +449,17 @@ class RetrievalEngine:
         hits = self._search_chunks(query, allowed_doc_ids=allowed)
 
         # Optional cross-encoder rerank (L3 tail).
+        #
+        # M3d fix — rerank is *complementary*, not replacement.
+        # The previous code truncated rerank output to ``max(intent.top_k, 10)``
+        # and placed those as ranks 1..10 with hybrid tail appended, so any
+        # gold event that was in hybrid top-5 but outside rerank top-8 got
+        # evicted before reaching the final ``[:intent.top_k]`` slice. This
+        # caused a Recall@5 regression on gold_50 (0.156 → 0.053).
+        #
+        # The new contract: ask the reranker for as many events as the
+        # hybrid pool contains (capped at 50) so fusion sees full coverage,
+        # then RRF-fuse the two event-level rankings symmetrically.
         rerank_event_order: list[str] | None = None
         if self.rerank_enabled and hits:
             try:
@@ -461,11 +472,16 @@ class RetrievalEngine:
                     )
                     for i, hit in enumerate(hits, start=1)
                 ]
+                # Widen rerank output so RRF fusion can see events that
+                # are rank-heavy in hybrid but rank-light in rerank (and
+                # vice versa). 50 is enough to cover the full event dedup
+                # of a 100-chunk pool.
+                rerank_top_k = min(max(len(hits), intent.top_k * 5), 50)
                 reranked = reranker.rerank(
                     query=query,
                     candidates=candidates,
                     intent=intent.name,
-                    top_k=max(intent.top_k, 10),
+                    top_k=rerank_top_k,
                 )
                 if reranked:
                     rerank_event_order = [r.event_id for r in reranked]
@@ -491,25 +507,44 @@ class RetrievalEngine:
                 grouped_snippets[event_id].append(chunk["chunk_text"][:220])
 
         if rerank_event_order:
-            # Re-order by the cross-encoder's event-level ranking; any events
-            # missing from the rerank output keep their hybrid order as tail.
-            seen: set[str] = set()
-            ordered_events: list[tuple[str, float]] = []
-            for rank_pos, event_id in enumerate(rerank_event_order, start=1):
-                if event_id not in grouped_scores or event_id in seen:
+            # M3d fix — RRF fusion of (hybrid event order) ⊕ (rerank event
+            # order). The previous "rerank first + hybrid tail" merge was
+            # equivalent to replacement because the downstream ``:top_k``
+            # slice only kept rerank events. Symmetric RRF lets events with
+            # moderately strong hybrid rank survive even when rerank ranks
+            # them low, and vice versa.
+            #
+            # Note: we deliberately do **not** apply a slot-aware sieve
+            # here. An earlier experiment demoting events whose year /
+            # violation_type disagreed with the extracted slots made the
+            # aggregate worse — it correctly fixed hard-year queries like
+            # "2022 董事长内幕交易", but over-penalised multi-year gold
+            # sets (e.g. queries mentioning "2005 年《证券法》" where the
+            # year is a law-promulgation cue, not a case-year constraint).
+            # See docs/reports/m3d_fix_report.md §3 for the full ablation.
+            hybrid_event_order = [
+                eid
+                for eid, _ in sorted(
+                    grouped_scores.items(), key=lambda it: it[1], reverse=True
+                )
+            ]
+            fused_rank: dict[str, float] = defaultdict(float)
+            # RRF constant — same k=60 used for BM25+Dense fusion.
+            rrf_k = int(self.rrf_k)
+            for rank, eid in enumerate(hybrid_event_order, start=1):
+                fused_rank[eid] += 1.0 / (rrf_k + rank)
+            for rank, eid in enumerate(rerank_event_order, start=1):
+                if eid not in grouped_scores:
+                    # Reranker returned an event that wasn't in the hybrid
+                    # candidate pool — skip (can only happen if chunk
+                    # lookup attributes a different event_id, e.g. via the
+                    # ``cand.chunk_id.split("-")[0]`` fallback).
                     continue
-                # Fake a monotonically-decreasing score so the downstream
-                # formatter can still sort by score if needed.
-                ordered_events.append((event_id, 1.0 - rank_pos * 1e-3))
-                seen.add(event_id)
-            # Append anything grouped but not reranked in original hybrid order.
-            for event_id, score in sorted(
-                grouped_scores.items(), key=lambda it: it[1], reverse=True
-            ):
-                if event_id in seen:
-                    continue
-                ordered_events.append((event_id, score))
-                seen.add(event_id)
+                fused_rank[eid] += 1.0 / (rrf_k + rank)
+
+            ordered_events = sorted(
+                fused_rank.items(), key=lambda it: it[1], reverse=True
+            )
         else:
             ordered_events = sorted(
                 grouped_scores.items(), key=lambda item: item[1], reverse=True

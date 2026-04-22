@@ -35,7 +35,7 @@
     "max_length": 512,
     "batch_size": 16,
     "candidate_pool_max": 100,
-    "final_top_k_events": 10,
+    "final_top_k_events": 50,
     "device": "auto",
     "use_fp16": true
   },
