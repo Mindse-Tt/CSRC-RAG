@@ -12,6 +12,7 @@ from csrc_rag.orchestration.intents import IntentDecision, IntentSpec, load_regi
 from csrc_rag.orchestration.rewriter import rewrite as rewrite_query
 from csrc_rag.orchestration.slot_filler import extract_slots
 from csrc_rag.orchestration.topic_guard import is_out_of_scope
+from csrc_rag.orchestration.trend_aggregator import TrendAggregator, TrendResult
 from csrc_rag.retrieval.bm25 import BM25Index
 from csrc_rag.retrieval.dense import (
     BgeZhDenseEncoder,
@@ -169,6 +170,11 @@ class RetrievalEngine:
         self.rerank_enabled = default_enabled if rerank_enabled is None else rerank_enabled
         self._reranker: Reranker | None = None
         self._reranker_cfg_dict: dict[str, Any] = reranker_cfg
+
+        # M4.1: L6 Trend Aggregator. Loaded lazily on first trend_analysis
+        # query so the default import cost is unchanged for case_retrieval /
+        # law_grounding / sanction_recommendation users.
+        self._trend_aggregator: TrendAggregator | None = None
 
     # ------------------------------------------------------------------
     # Dense backend factory
@@ -466,6 +472,104 @@ class RetrievalEngine:
         # Cap total at 5 to bound cost.
         return variants[:5], diag
 
+    # ------------------------------------------------------------------
+    # M4.1: L6 Trend Aggregator (structured aggregation short-circuit)
+    # ------------------------------------------------------------------
+    def _get_trend_aggregator(self) -> TrendAggregator:
+        """Lazy-load the aggregator from the event corpus."""
+        if self._trend_aggregator is None:
+            self._trend_aggregator = TrendAggregator(
+                list(self.event_docs.values())
+            )
+        return self._trend_aggregator
+
+    def _trend_search(
+        self,
+        query: str,
+        intent: IntentSpec,
+        intent_decision: IntentDecision,
+    ) -> SearchResponse:
+        """Short-circuit ``trend_analysis`` through the L6 aggregator.
+
+        Produces a ``SearchResponse`` whose answer is a deterministic
+        summary of the aggregated counts, and whose ``events`` list
+        carries the sample EventIDs per facet (so the L7 validator can
+        verify any citation the downstream LLM inserts).
+        """
+        aggregator = self._get_trend_aggregator()
+
+        # Pull slot constraints from the rewriter so that queries like
+        # "2022-2024 内幕交易年度趋势" narrow the corpus to violation_type
+        # == 内幕交易 BEFORE the year-bucket count (otherwise the count is
+        # "all 2022-2024 penalties", not "all 2022-2024 insider trading").
+        rewrite_out = rewrite_query(query, history=[], intent=intent.name)
+        slots = rewrite_out.slots or {}
+        slot_filters: dict[str, list[str]] = {}
+        for key in ("violation_type", "punishment_type"):
+            raw = slots.get(key)
+            if raw:
+                slot_filters[key] = [
+                    str(x) for x in (raw if isinstance(raw, list) else [raw])
+                ]
+
+        result = aggregator.aggregate(query, slot_filters=slot_filters)
+
+        # Build a deterministic text answer so the engine is useful even
+        # without an LLM Responder (template backend). The M4 LoRA
+        # Responder will override ``response_output.text`` with a richer
+        # narrative summary.
+        answer_lines: list[str] = [
+            "根据证监会处罚案例数据库的结构化统计:",
+            "",
+            result.evidence_block,
+        ]
+        answer_text = "\n".join(answer_lines)
+
+        # Flatten sample events per facet into the events list so the
+        # existing frontend (which iterates response.events) still works.
+        ranked_events: list[EventResult] = []
+        for eid in result.supporting_event_ids[: intent.top_k]:
+            event = self.event_docs.get(eid)
+            if event is None:
+                continue
+            ranked_events.append(
+                EventResult(
+                    event_id=eid,
+                    title=event.get("title"),
+                    score=0.0,
+                    declare_date=event.get("declare_date"),
+                    promulgator=event.get("promulgator"),
+                    punishment_types=event.get("punishment_types", []),
+                    snippets=[(event.get("activity") or "")[:220]],
+                    laws=[event.get("law")] if event.get("law") else [],
+                )
+            )
+
+        return SearchResponse(
+            intent=intent.name,
+            intent_confidence=intent_decision.confidence,
+            intent_method=intent_decision.method,
+            intent_scores=intent_decision.scores,
+            response_backend="trend_aggregator",
+            response_model=None,
+            query_plan={
+                "retrieval_unit": "aggregate",
+                "top_k": intent.top_k,
+                "metadata_filters": slot_filters,
+                "detected_facets": list(result.detected_facets),
+                "year_window": list(result.year_window) if result.year_window else None,
+                "slice_counts": {
+                    sl.facet: [
+                        {"key": v.key, "count": v.count, "share": v.share}
+                        for v in sl.values
+                    ]
+                    for sl in result.slices
+                },
+            },
+            answer=answer_text,
+            events=[asdict(event) for event in ranked_events],
+        )
+
     def _planner_v2_early_exit(self, query: str) -> SearchResponse | None:
         """Short-circuit greeting / chitchat / out_of_scope predictions.
 
@@ -536,6 +640,16 @@ class RetrievalEngine:
         intent = intent_decision.spec
         query_plan = build_query_plan(query, intent)
         allowed, allowed_diag = self._compute_allowed_doc_ids(query, query_plan)
+
+        # M4.1: L6 Trend Aggregator short-circuit.
+        #
+        # trend_analysis does NOT go through vector retrieval; the Responder
+        # needs structured counts ("2022: 387 起 / 2023: 412 起 / ...") so
+        # we run the aggregator directly over the event corpus and return
+        # a SearchResponse whose ``events`` field carries sample events per
+        # facet and whose ``query_plan`` embeds the full ``TrendResult``.
+        if intent.name == "trend_analysis":
+            return self._trend_search(query, intent, intent_decision)
 
         # M3e-A: multi-query expansion. For single-clause questions the
         # variant list is just ``[canonical]`` and the behaviour is
