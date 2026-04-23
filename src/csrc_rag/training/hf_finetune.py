@@ -83,6 +83,7 @@ def run_hf_multilabel_finetune(
         greater_is_better=True,
         report_to="none",
         use_cpu=True,
+        save_safetensors=False,
     )
 
     def compute_metrics(eval_pred):
@@ -98,7 +99,7 @@ def run_hf_multilabel_finetune(
         args=args,
         train_dataset=train_ds,
         eval_dataset=valid_ds,
-        processing_class=tokenizer,
+        tokenizer=tokenizer,
         data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
         compute_metrics=compute_metrics,
     )

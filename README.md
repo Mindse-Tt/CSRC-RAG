@@ -6,6 +6,29 @@
 - 当事人级处罚类型预测模型
 - 可用于答辩展示的端到端 Demo
 
+## 🎯 交付物快速入口 (Track B, M6)
+
+| 产物 | 路径 | 说明 |
+|---|---|---|
+| 📘 **论文 (.docx)** | [`docs/paper/csrc_rag_v1.docx`](docs/paper/csrc_rag_v1.docx) | 8-12 页,8 节,含 4 表 + 3 图,数据全部实测 |
+| 🌐 **项目 Showcase** | [`docs/showcase/index.html`](docs/showcase/index.html) | GitHub Pages 首页 (KPI + 架构 + 消融) |
+| 🔀 **G0 vs G3 对比** | [`docs/showcase/compare.html`](docs/showcase/compare.html) | 30 条样本并排逐条对比,可按筛选条件切换 |
+| 📊 **M4.4 评测报告** | [`docs/reports/m4_4_generation_eval.md`](docs/reports/m4_4_generation_eval.md) | G0-G3 四组 × 5 指标总表 + 定性样例 |
+| 🧪 **LoRA Adapter (0.5B 本地)** | `artifacts/models/qwen_lora_csrc/` | 34 MB,Qwen2.5-0.5B-Instruct + QLoRA r=16 |
+| 🚀 **Colab 1.5B 重训** | [`notebooks/qwen_1_5b_qlora_colab.ipynb`](notebooks/qwen_1_5b_qlora_colab.ipynb) | T4 / P100 上的 1.5B QLoRA 备选方案 |
+
+**核心结论 (一句话)**: 在 Qwen2.5-0.5B 上,LoRA 微调达到断崖式提升 —— 格式合规率 0 → **76.7%**,幻觉数字率 20% → **3.3%** (-83%),延迟只增加 +0.7s (+7%)。
+
+### 启动 Showcase 本地预览
+
+```bash
+python -m http.server 8765 --directory docs
+# 打开 http://127.0.0.1:8765/showcase/index.html
+```
+
+或在 GitHub 上开启 Pages (Settings → Pages → Source: main / docs) 后,访问 `https://<you>.github.io/<repo>/showcase/`。
+
+
 当前仓库已经完成两层基础建设：
 
 - 项目总体框架文档
