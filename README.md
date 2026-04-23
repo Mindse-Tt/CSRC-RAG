@@ -10,7 +10,7 @@
 
 | 产物 | 路径 | 说明 |
 |---|---|---|
-| 📘 **论文 (.docx)** | [`docs/paper/csrc_rag_v1.docx`](docs/paper/csrc_rag_v1.docx) | 8-12 页,8 节,含 4 表 + 3 图,数据全部实测 |
+| 📘 **论文 (.docx)** | [`docs/paper/csrc_rag_v2.docx`](docs/paper/csrc_rag_v2.docx) | 8-12 页,含 **6 张学术风 PNG 图** + 6 张表,四段式摘要,ACL/EMNLP 风格 |
 | 🌐 **项目 Showcase** | [`docs/showcase/index.html`](docs/showcase/index.html) | GitHub Pages 首页 (KPI + 架构 + 消融) |
 | 🔀 **G0 vs G3 对比** | [`docs/showcase/compare.html`](docs/showcase/compare.html) | 30 条样本并排逐条对比,可按筛选条件切换 |
 | 📊 **M4.4 评测报告** | [`docs/reports/m4_4_generation_eval.md`](docs/reports/m4_4_generation_eval.md) | G0-G3 四组 × 5 指标总表 + 定性样例 |
