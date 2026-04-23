@@ -1,12 +1,12 @@
 {
   "meta": {
-    "name": "qwen2.5-1.5b-qlora-csrc-v1",
+    "name": "qwen2.5-0.5b-qlora-csrc-v1",
     "owner": "StrategyAgent-H",
-    "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
     "fallback_base_model": "Qwen/Qwen2.5-0.5B-Instruct",
     "data_version": "rag_qa_train_v1",
     "seed": 42,
-    "_note": "Turing (RTX 2060S) fp16 adaptation — bf16 unsupported on Turing; batch/accum re-tuned for 8GB VRAM"
+    "_note": "Turing (RTX 2060S 8GB) — 1.5B QLoRA OOM at step 8 with max_seq=2048; downgraded to 0.5B for local training. 1.5B path kept as 'experiments.colab_1_5b' for Colab T4 fallback."
   },
   "quantization": {
     "load_in_4bit": true,
@@ -36,8 +36,8 @@
     "per_device_eval_batch_size": 2,
     "gradient_accumulation_steps": 8,
     "learning_rate": 2e-4,
-    "num_train_epochs": 3,
-    "max_seq_length": 2048,
+    "num_train_epochs": 2,
+    "max_seq_length": 768,
     "warmup_ratio": 0.03,
     "lr_scheduler_type": "cosine",
     "weight_decay": 0.0,

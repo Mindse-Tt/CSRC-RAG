@@ -126,7 +126,12 @@ def build_model_and_tokenizer(cfg: QLoRAConfig, debug: bool = False) -> tuple[An
         BitsAndBytesConfig,
     )
 
-    model_name = cfg.fallback_base_model if debug else cfg.base_model
+    # Policy: debug=True just shrinks the dataset (see main()), but we
+    # keep the full 4-bit quantisation path so the smoke test actually
+    # exercises the same memory profile as the main run. On GPUs with
+    # <6 GB free headroom a non-quantised 0.5B blows up anyway because
+    # activations dominate.
+    model_name = cfg.base_model
     logger.info("loading base model: %s (debug=%s)", model_name, debug)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
@@ -134,7 +139,7 @@ def build_model_and_tokenizer(cfg: QLoRAConfig, debug: bool = False) -> tuple[An
         tokenizer.pad_token = tokenizer.eos_token
 
     bnb_kwargs: dict[str, Any] = {}
-    if torch.cuda.is_available() and not debug:
+    if torch.cuda.is_available():
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=cfg.quantization["load_in_4bit"],
             bnb_4bit_quant_type=cfg.quantization["bnb_4bit_quant_type"],
@@ -152,12 +157,20 @@ def build_model_and_tokenizer(cfg: QLoRAConfig, debug: bool = False) -> tuple[An
         **bnb_kwargs,
     )
 
-    if torch.cuda.is_available() and not debug:
+    if torch.cuda.is_available():
         from peft import prepare_model_for_kbit_training  # type: ignore
 
         model = prepare_model_for_kbit_training(
             model, use_gradient_checkpointing=cfg.training["gradient_checkpointing"]
         )
+    else:
+        # CPU-only debug path: input_require_grads is needed for LoRA
+        # to produce a connected graph under gradient checkpointing.
+        if cfg.training.get("gradient_checkpointing"):
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
+            if hasattr(model, "gradient_checkpointing_enable"):
+                model.gradient_checkpointing_enable()
 
     return model, tokenizer
 
@@ -194,7 +207,7 @@ def train(
     import torch  # type: ignore
     from datasets import Dataset  # type: ignore
     from transformers import (  # type: ignore
-        DataCollatorForLanguageModeling,
+        DataCollatorForSeq2Seq,
         EarlyStoppingCallback,
         Trainer,
         TrainingArguments,
@@ -247,7 +260,11 @@ def train(
         seed=cfg.training["seed"],
     )
 
-    collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    collator = DataCollatorForSeq2Seq(
+        tokenizer=tokenizer,
+        padding=True,
+        return_tensors="pt",
+    )
 
     callbacks = []
     if val_ds is not None:
