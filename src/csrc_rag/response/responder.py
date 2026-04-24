@@ -431,7 +431,18 @@ class LocalHFResponder:
                 "- \u4f9d\u636e\u8981\u70b9\u4f18\u5148\u5f15\u7528\u6cd5\u89c4\u540d\u79f0\u6216\u5904\u7f5a\u7c7b\u578b\uff0c\u4e0d\u8981\u9010\u5b57\u590d\u5236\u957f\u6bb5\u539f\u6587\u3002",
                 "- \u76f8\u4f3c\u6848\u4f8b\u63d0\u793a\u53ea\u5199\u6848\u4f8b\u6807\u9898\u3001\u5e74\u4efd\u548c\u673a\u6784\uff0c\u4e0d\u8981\u8d34\u6574\u6bb5\u8bc1\u636e\u3002",
                 "- \u6bcf\u4e00\u90e8\u5206\u5c3d\u91cf\u7b80\u6d01\uff0c\u907f\u514d\u8d85\u8fc74\u6761\u3002",
-                "- \u5982\u679c\u8bc1\u636e\u4e0d\u8db3\uff0c\u76f4\u63a5\u5199\u201c\u8bc1\u636e\u4e0d\u8db3\u201d\u3002",
+                # B2 fix: even when no single retrieval result perfectly matches
+                # the query, the responder MUST still cite the most relevant
+                # EventID(s) from the retrieved evidence. Empty "参考历史相似案例"
+                # boilerplate without citation is forbidden.
+                "- **\u5fc5\u987b\u5f15\u7528\u6848\u4f8b**\uff1a\u56de\u7b54\u4e2d\u81f3\u5c11\u51fa\u73b0\u4e00\u4e2a [EventID=xxx] \u683c\u5f0f\u7684\u5f15\u7528\uff0c"
+                "\u4f18\u5148\u5f15\u7528\u8bc1\u636e\u4e2d\u6700\u76f8\u5173\u7684\u6848\u4f8b "
+                "[EventID=" + (ranked_events[0].event_id if ranked_events else "xxx") + "]\u3002"
+                "\u5373\u4f7f\u68c0\u7d22\u8fd4\u56de\u7684\u6848\u4f8b\u4e0e\u67e5\u8be2\u4e0d\u5b8c\u5168\u5339\u914d\uff0c"
+                "\u4e5f\u8981\u5f15\u7528\u6700\u63a5\u8fd1\u7684\u6848\u4f8b\u5e76\u8bf4\u660e\u76f8\u4f3c\u4e4b\u5904\uff0c"
+                "**\u4e0d\u5141\u8bb8\u7528\u201c\u53c2\u8003\u5386\u53f2\u76f8\u4f3c\u6848\u4f8b\u201d\u7b49\u7a7a\u8bdd\u66ff\u4ee3\u5177\u4f53\u5f15\u7528**\u3002",
+                "- \u5982\u679c\u8bc1\u636e\u7a7a\u96c6\uff0c\u76f4\u63a5\u5199\u201c\u8bc1\u636e\u4e0d\u8db3\u201d\uff0c"
+                "\u8fd9\u662f\u552f\u4e00\u53ef\u4ee5\u4e0d\u5f15\u7528 EventID \u7684\u60c5\u51b5\u3002",
                 "\u56de\u7b54\u7528\u4e2d\u6587\u3002",
             ]
         )
@@ -464,7 +475,11 @@ class LocalHFResponder:
             messages = [
                 {
                     "role": "system",
-                    "content": "\u4f60\u662f\u8bc1\u76d1\u4f1a\u5904\u7f5a\u6848\u4f8b\u667a\u80fd\u5206\u6790\u52a9\u624b\uff0c\u53ea\u80fd\u4f9d\u636e\u7ed9\u5b9a\u8bc1\u636e\u56de\u7b54\u3002",
+                    "content": (
+                        "\u4f60\u662f\u8bc1\u76d1\u4f1a\u5904\u7f5a\u6848\u4f8b\u667a\u80fd\u5206\u6790\u52a9\u624b\uff0c\u53ea\u80fd\u4f9d\u636e\u7ed9\u5b9a\u8bc1\u636e\u56de\u7b54\u3002"
+                        "\u56de\u7b54\u5fc5\u987b\u5f15\u7528 [EventID=xxx] \u683c\u5f0f\u7684\u5177\u4f53\u6848\u4f8b\uff0c"
+                        "\u4e0d\u5141\u8bb8\u7528\u201c\u53c2\u8003\u5386\u53f2\u76f8\u4f3c\u6848\u4f8b\u201d\u7b49\u7a7a\u8bdd\u66ff\u4ee3\u3002"
+                    ),
                 },
                 {"role": "user", "content": prompt},
             ]
@@ -487,6 +502,16 @@ class LocalHFResponder:
         generated = output[0][inputs["input_ids"].shape[1]:]
         answer = tokenizer.decode(generated, skip_special_tokens=True).strip()
         answer = _postprocess_answer(answer)
+        # B2 fallback: if the LoRA still produces boilerplate with no EventID
+        # citation but the retriever did return evidence, force-append the
+        # top-1 EventID so the answer is never a citation-less dead end.
+        if ranked_events and "[EventID=" not in answer:
+            top1_eid = ranked_events[0].event_id
+            if top1_eid:
+                answer = (
+                    f"{answer.rstrip('。;；,，。 ')}"
+                    f"；参考案例见 [EventID={top1_eid}]\u3002"
+                )
         if not answer:
             answer = (
                 "\u8bc1\u636e\u5df2\u53ec\u56de\uff0c\u4f46\u672c\u5730\u56de\u590d\u6a21\u578b\u672a\u751f\u6210\u6709\u6548\u6587\u672c\uff0c"

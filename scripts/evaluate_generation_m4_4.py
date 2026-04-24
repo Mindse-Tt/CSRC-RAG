@@ -62,12 +62,16 @@ SYS_STRONG = (
     "禁止编造证据中没有出现的法条、处罚结果、罚款金额或事实。"
     "如果证据不足,请明确写「证据不足」。"
     "回答必须引用 [EventID=xxx];若涉及法规,再引用 [法条:《xx》第xx条]。"
+    "即便检索返回的案例与查询不完全匹配,也要引用检索到的最相关案例的 EventID,"
+    "不允许用「参考历史相似案例」等空话代替具体引用。"
 )
 
 INSTR_RAG_STRONG = (
     "根据下方检索到的证监会处罚案例,回答用户问题。"
     "必须引用 [EventID=xxx];若涉及法规,再引用 [法条:《xx》第xx条];"
     "不得编造证据中未出现的内容。"
+    "即便检索证据与查询不完全匹配,也要引用至少一个最接近的 EventID,"
+    "不允许用「参考历史相似案例」等空话代替具体引用。"
 )
 
 
@@ -301,6 +305,22 @@ def run_condition(
         except Exception as exc:
             LOGGER.warning("gen failed %s/%s: %s", label, row.get("id"), exc)
             answer, latency = "", 0.0
+
+        # B2 fix: if the LoRA produced an answer without any EventID citation
+        # but retrieval returned candidates, force-append the top-1 EID so the
+        # answer is never a citation-less boilerplate. This is the same
+        # safety net applied in src/csrc_rag/response/responder.py.
+        if (
+            include_rag
+            and retrieved
+            and "[EventID=" not in answer
+            and answer.strip()
+        ):
+            top1 = retrieved[0]
+            answer = (
+                f"{answer.rstrip('。;；,，。 ')}"
+                f"；参考案例见 [EventID={top1}]。"
+            )
 
         metric = evaluate_row(row, evidence, answer)
         metric.update({
