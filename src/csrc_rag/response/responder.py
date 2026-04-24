@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import statistics
 from collections import Counter
 from dataclasses import dataclass
@@ -16,6 +17,89 @@ class ResponseOutput:
     text: str
     backend: str
     model_name: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Post-processing filter for LoRA outputs
+# ---------------------------------------------------------------------------
+# The LoRA-tuned Qwen-0.5B occasionally leaks training-data artefacts that
+# should never appear in user-facing answers:
+#   • Python-style variable names such as ``most_like_thing_1=``,
+#     ``most_faq_affected_event_1=None``.
+#   • Full-width semicolons between EventID tags, e.g.
+#     ``[EventID=40109363；EventID=401737]`` (should be ``][`` separated).
+#   • Dangling ``=None`` / ``None`` literals.
+#
+# These patterns are removed / normalised here so the end user never sees
+# them. This is a conservative safety net, not a substitute for cleaner
+# training data; see ``docs/reports/bad_cases.md`` for root-cause notes.
+
+# Variable-name leaks: ``<name>_<int>=`` up to the next separator.
+_VAR_LEAK_RE = re.compile(
+    r"(?:most_like_[a-z_]*\d*|most_faq_[a-z_]*\d*|affected_event_\d+|"
+    r"faq_result_\d+|faq_affected_event_\d+|like_thing_\d+)"
+    r"\s*=\s*[^；;\n]*(?:；|;|\n|$)",
+    flags=re.IGNORECASE,
+)
+
+# Bare "=None" or leading comma/semicolon followed by None
+_NONE_LITERAL_RE = re.compile(r"(?:[;；,，]\s*)?=\s*None\b", flags=re.IGNORECASE)
+
+# Two or more consecutive EventID tags glued with full-width / half-width
+# semicolons: ``[EventID=xxx；EventID=yyy]`` → ``[EventID=xxx][EventID=yyy]``.
+_EID_SEMICOLON_RE = re.compile(r"(\[EventID=\d+)[；;,，]\s*(EventID=\d+)")
+
+# Leftover marker words that sometimes slip through the LoRA: a bare
+# ``most_faq_result_1`` with no value following.
+_BARE_MARKER_RE = re.compile(
+    r"(?:most_like_[a-z_]*\d*|most_faq_[a-z_]*\d*|affected_event_\d+|"
+    r"faq_result_\d+)\b",
+    flags=re.IGNORECASE,
+)
+
+# Multiple spaces / stray whitespace cleanup
+_MULTI_WS_RE = re.compile(r"[ \t]{2,}")
+
+
+def _postprocess_answer(text: str) -> str:
+    """Strip training-data leaks and normalise EventID separators.
+
+    Applied to every local HF responder decode before it is returned to the
+    user. Idempotent: running this on already-cleaned text is a no-op.
+    """
+    if not text:
+        return text
+
+    original = text
+
+    # 1) Normalise ``[EventID=a；EventID=b]`` → ``[EventID=a][EventID=b]``.
+    # Apply repeatedly until stable (in case three+ EIDs are chained).
+    while True:
+        new = _EID_SEMICOLON_RE.sub(r"\1][\2", text)
+        if new == text:
+            break
+        text = new
+
+    # 2) Drop ``most_like_xxx_1='...' ；`` style leaks.
+    text = _VAR_LEAK_RE.sub("", text)
+
+    # 3) Strip bare ``=None`` residues left behind.
+    text = _NONE_LITERAL_RE.sub("", text)
+
+    # 4) Remove any remaining bare marker words that survived step 2.
+    text = _BARE_MARKER_RE.sub("", text)
+
+    # 5) Collapse consecutive punctuation left by the removals.
+    text = re.sub(r"[；;]{2,}", "；", text)
+    text = re.sub(r"[，,]{2,}", "，", text)
+    text = re.sub(r"\s*[；;]\s*(?=[。\n]|$)", "", text)
+    text = _MULTI_WS_RE.sub(" ", text)
+
+    cleaned = text.strip(" \t；;，,")
+
+    # If post-processing ate everything, fall back to the raw text so the
+    # caller can still use a downgrade path.
+    return cleaned if cleaned else original
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +486,7 @@ class LocalHFResponder:
             )
         generated = output[0][inputs["input_ids"].shape[1]:]
         answer = tokenizer.decode(generated, skip_special_tokens=True).strip()
+        answer = _postprocess_answer(answer)
         if not answer:
             answer = (
                 "\u8bc1\u636e\u5df2\u53ec\u56de\uff0c\u4f46\u672c\u5730\u56de\u590d\u6a21\u578b\u672a\u751f\u6210\u6709\u6548\u6587\u672c\uff0c"

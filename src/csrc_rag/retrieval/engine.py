@@ -43,9 +43,66 @@ _PLANNER_V2_REJECT_LABELS: frozenset[str] = frozenset(
     {"greeting", "chitchat", "out_of_scope"}
 )
 
+# Hard overrides for self-introduction / capability queries.
+# These always map to the greeting response (self-intro + capability hints)
+# regardless of what the v2 classifier predicts. This fixes a known failure
+# mode where "你是谁" / "你能干嘛" were being classified as chitchat and
+# receiving a dismissive reply, when they should be answered politely.
+_GREETING_HARD_RULES: tuple[str, ...] = (
+    "你是谁",
+    "你叫什么",
+    "你的名字",
+    "自我介绍",
+    "介绍一下自己",
+    "介绍下自己",
+    "介绍下你自己",
+    "介绍一下你",
+    "介绍你自己",
+    "你能干嘛",
+    "你能干什么",
+    "你能做什么",
+    "你能做啥",
+    "你会什么",
+    "你会做什么",
+    "你会干嘛",
+    "你有什么功能",
+    "你是什么",
+    "你是啥",
+    "你是什么模型",
+    "你是哪个模型",
+    "你是做什么的",
+    "你用来干嘛",
+    "你用来做什么",
+    "有什么用",
+    "能帮我做什么",
+    "能帮我什么",
+    "怎么用你",
+    "如何使用",
+    "使用说明",
+    "help",
+    "帮助",
+    "功能介绍",
+)
+
+
+def _matches_greeting_rule(query: str) -> bool:
+    """Return True iff the query is a self-introduction / capability question.
+
+    Uses substring containment on a curated list. We intentionally match even
+    when the query has extra punctuation or leading greetings (e.g. "你好,
+    你是谁?" should still qualify).
+    """
+    q = query.strip().lower()
+    if not q:
+        return False
+    # Strip common Chinese punctuation that could break substring matches
+    for ch in ("?", "？", "!", "！", ",", ",", "。", "、", " "):
+        q = q.replace(ch, "")
+    return any(kw in q for kw in _GREETING_HARD_RULES)
+
 _PLANNER_V2_FALLBACK_MESSAGES: dict[str, str] = {
     "greeting": (
-        "你好！我是证监会违规处罚案例智能问答助手。\n"
+        "你好！我是 CSRC-RAG —— 证监会违规处罚案例智能问答助手。\n"
         "我可以帮你完成四件事：\n"
         "1. 案例检索 — 类似「2023 年内幕交易被罚的案例有哪些？」\n"
         "2. 法规依据 — 类似「信息披露违规通常违反哪条法规？」\n"
@@ -53,14 +110,27 @@ _PLANNER_V2_FALLBACK_MESSAGES: dict[str, str] = {
         "4. 趋势分析 — 类似「近五年操纵市场案件的处罚趋势？」"
     ),
     "chitchat": (
-        "这个问题有点超出我的专长 😊。\n"
-        "我专注于 证监会处罚案例 的检索、法规依据、处罚分析与趋势统计。\n"
-        "要不要试试：「近两年信披违规案例有哪些？」或「证券法第 197 条适用什么情形？」"
+        "你好！我是 CSRC-RAG，一个基于 Qwen2.5-0.5B + LoRA 微调的"
+        "证监会违规处罚案例智能问答助手。\n\n"
+        "我的知识库覆盖 2000–2025 年共 4,233 起证监会公开处罚事件，"
+        "擅长：\n"
+        "• 相似案例检索（基于 BM25 + 语义向量双路 + Rerank）\n"
+        "• 法规依据匹配（《证券法》、《期货交易管理条例》等）\n"
+        "• 处罚方式推荐（罚款 / 警告 / 市场禁入 / 没收非法所得 等）\n"
+        "• 违规趋势统计（按年份 / 违规类型 / 监管机构）\n\n"
+        "你可以这样问我：\n"
+        "— 「谭光华因违规买卖股票被处罚的详情」\n"
+        "— 「虚假披露通常违反哪些法条」\n"
+        "— 「近五年内幕交易案件是否呈上升趋势」"
     ),
     "out_of_scope": (
-        "抱歉，该问题不在本系统覆盖范围内。\n"
-        "数据来源：仅限中国证监会公开处罚案例（证券 / 基金 / 期货 / 上市公司）。\n"
-        "不涵盖：股价预测、个股推荐、编程问题、娱乐内容、医疗 / 法律咨询。"
+        "抱歉，这个问题不在我的能力范围内。\n\n"
+        "我专注于 **中国证监会公开处罚案例** 的检索与分析，"
+        "数据范围仅覆盖证券、基金、期货、上市公司领域；不涉及：\n"
+        "• 股价预测 / 个股推荐 / 投资建议\n"
+        "• 编程 / 写作 / 娱乐话题\n"
+        "• 医疗 / 法律咨询 / 税务筹划\n\n"
+        "如果你想了解我能做什么，可以问「你能做什么」。"
     ),
 }
 
@@ -579,9 +649,28 @@ class RetrievalEngine:
         template ``SearchResponse`` directly and skip retrieval + responder
         entirely — this matches the L1 tier of the reject strategy.
 
+        A rule-based override is applied first: self-introduction and
+        capability-discovery queries ("你是谁", "你能干嘛", ...) are always
+        routed to the greeting response, even if the classifier calls them
+        chitchat or out_of_scope.
+
         Returns ``None`` when the planner is unavailable or predicts a
         productive label (in which case the usual pipeline continues).
         """
+        # Rule-based override — always wins for self-intro / capability Qs
+        if _matches_greeting_rule(query):
+            return SearchResponse(
+                intent="greeting",
+                intent_confidence=1.0,
+                intent_method="rule_override",
+                intent_scores={"greeting": 1.0},
+                response_backend="planner_v2_fallback",
+                response_model=None,
+                query_plan={"retrieval_unit": "-", "top_k": 0, "metadata_filters": {}},
+                answer=_PLANNER_V2_FALLBACK_MESSAGES["greeting"],
+                events=[],
+            )
+
         if self._planner is None:
             return None
         prediction = self._planner.predict(query)
