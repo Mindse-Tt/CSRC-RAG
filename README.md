@@ -1,11 +1,12 @@
-# CSRC-RAG · 证监会违规案例智能检索与问答系统
+# CSRC-RAG: A RAG-based Intelligent Q&A System for Securities Regulatory Penalty Cases with QLoRA Fine-tuning and Multi-layer Hallucination Control
+
+# 证监会违规案例智能检索与问答系统
 
 <p align="center">
   <img src="https://img.shields.io/badge/Track-B-blue" />
   <img src="https://img.shields.io/badge/Base-Qwen2.5--0.5B-orange" />
   <img src="https://img.shields.io/badge/Method-QLoRA-green" />
   <img src="https://img.shields.io/badge/GPU-RTX_2060S_8GB-lightgrey" />
-  <img src="https://img.shields.io/badge/Agents-Multi--Agent_Team-purple" />
 </p>
 
 **深度学习课程设计 · 赛道 B（垂直领域智能问答）** · 2026.04
@@ -86,18 +87,16 @@
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────┐
-│ L5 Qwen2.5-0.5B + QLoRA 生成                            │
+│ L5 生成：Qwen2.5-0.5B + QLoRA 生成                            │
 │     r=16, α=32, 4-bit NF4 量化, 全 attention+FFN 层     │
 └─────────────────────────────────────────────────────────┘
                  │
-                 ▼
-┌─────────────────────────────────────────────────────────┐
-│ L6 趋势聚合器 (SQL-like groupby, 按年/类型分面)          │
-└─────────────────────────────────────────────────────────┘
+                 ├── [trend 意图] ──▶ L6 趋势聚合器 (SQL-like groupby)
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────┐
 │ L7 引证校验 (Validator, 8 条 YAML 规则)                  │
+│     • 对 L5 输出做事后校验，非生成环节                    │
 │     • EID 必须在证据中 • 法条必须在证据中                │
 │     • 不得出现证据外的罚款金额 • 失败→降级话术           │
 └─────────────────────────────────────────────────────────┘
@@ -118,23 +117,28 @@
 | L5 | 生成 | Qwen2.5-0.5B + QLoRA | **8GB GPU 硬约束下唯一能全链路部署的选择** |
 | L5 | 量化 | 4-bit NF4 | QLoRA 原生支持，精度损失 <1% |
 
-### 2.3 Multi-Agent Team 开发架构
+### 2.3 大模型 Prompt 设计
 
-本项目采用多智能体协作模式，通过 Agent 分工提升开发效率：
+系统通过两层 prompt 控制生成行为：
 
+**System Prompt（角色约束）**：
 ```
-          ┌─────────────────────────┐
-          │    Leader Agent (总调度) │
-          └────────┬────────────────┘
-     ┌─────────────┼─────────────┐
-     ▼             ▼             ▼
-┌────────┐   ┌─────────┐   ┌──────────┐
-│ Scout  │   │ Worker  │   │Evaluator │
-│ 策略研究│   │ 代码实现│   │ 评测分析 │
-└────────┘   └─────────┘   └──────────┘
+你是证监会处罚案例智能分析助手。你只能根据给定案例证据回答，禁止编造
+未出现的法条、处罚结果、金额或事实。如果证据不足，请明确写"证据不足"。
 ```
 
-策略文档：[`docs/strategies/`](docs/strategies/)（12 份 Agent 分工和策略文档）
+**Instruction Prompt（任务约束，按类别不同）**：
+```
+根据检索到的证监会处罚案例，回答用户关于主体、人员、监管机构或证券代码
+的查询。只能使用证据中出现的案例，并逐条引用 [EventID=xxx]。
+```
+
+**完整输入结构**：
+```
+[System] 角色约束
+[User]   Instruction + 用户问题 + [检索证据] 案例1/2/3...
+[Assistant] 结构化回答 + [EventID=xxx] 引证
+```
 
 ---
 
@@ -263,19 +267,6 @@
 
 ---
 
-## 五、我们的优势
-
-| 维度 | 优势 | 对比 |
-|------|------|------|
-| **资源约束** | 8GB GPU 全流程跑通 | 主流方案需 24GB+ |
-| **幻觉控制** | 三层防线（RAG+训练+规则），3.3% | 开源 7B 模型: 20-30% |
-| **可审计性** | L7 确定性校验器，每条回答可追溯 | 通用 LLM 黑盒输出 |
-| **方法论** | 严格四组消融，控制变量实验设计 | 多数项目只报最终结果 |
-| **工程完整度** | 七层解耦流水线，各层独立可测 | 端到端黑盒系统 |
-| **Agent Team** | 多智能体策略-执行分离 | 单人开发 |
-
----
-
 ## 六、如何启动项目
 
 ### 6.1 环境要求
@@ -369,10 +360,10 @@ Deeplearning-Rag-Test/
 │
 ├── docs/
 │   ├── evaluation_metrics.md  # 6项指标学术文档
-│   ├── strategies/         # Agent Team 策略 (12份)
+│   ├── strategies/         # 技术策略文档
 │   └── reports/            # 实验报告
 │
-├── tools/                  # Agent Team 工具
+├── tools/                  # 辅助工具
 │   └── agent_team_runner.py
 │
 ├── web/                    # 前端 (聊天 + G0/G3 对比)
@@ -403,5 +394,5 @@ Deeplearning-Rag-Test/
 ---
 
 <p align="center">
-  <sub>Built with Qwen2.5 · QLoRA · Multi-Agent Team · Hallucination-aware Design</sub>
+  <sub>Built with Qwen2.5 · QLoRA · RAG · Hallucination-aware Design</sub>
 </p>
