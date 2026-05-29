@@ -108,15 +108,15 @@
 
 ### 2.2 各层技术选型
 
-| 层 | 组件 | 技术 | 关键参数 |
+> 详细选型理由与候选对比见 [`docs/model_selection.md`](docs/model_selection.md)
+
+| 层 | 组件 | 技术 | 选型理由 |
 |---|---|---|---|
-| L1 | 意图分类 | TF-IDF + Logistic Regression | Macro-F1 = 0.9989 |
-| L2 | 查询改写 | 规则 + LLM fallback | 257 规范词 / 673 别名 |
-| L3 | 混合检索 | BM25 + bge-small-zh-v1.5 + RRF | k=60, top-100 each |
-| L4 | 精排 | bge-reranker-v2-m3 | cross-encoder, top-5 |
-| L5 | 生成 | Qwen2.5-0.5B + QLoRA | r=16, α=32, NF4 4-bit |
-| L6 | 聚合 | SQL-like groupby | facet: year/vtype/ptype |
-| L7 | 校验 | YAML 规则引擎 | 8 条规则，确定性解析 |
+| L1 | 意图分类 | TF-IDF + LogReg | F1=0.9989，更复杂模型无收益 |
+| L3 | 稠密检索 | bge-small-zh-v1.5 | 99MB，中文MTEB Top-3，显存友好 |
+| L4 | 精排 | bge-reranker-v2-m3 | 中文最优 cross-encoder |
+| L5 | 生成 | Qwen2.5-0.5B + QLoRA | **8GB GPU 硬约束下唯一能全链路部署的选择** |
+| L5 | 量化 | 4-bit NF4 | QLoRA 原生支持，精度损失 <1% |
 
 ### 2.3 Multi-Agent Team 开发架构
 
