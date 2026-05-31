@@ -41,9 +41,9 @@
 
 | 指标 | 微调前 (G0) | 微调后 (G3) | 提升 |
 |------|:-----------:|:-----------:|:----:|
-| 幻觉数字率 ↓ | 36.7% | **3.3%** | -91% |
-| 格式合规率 ↑ | 0% | **100%** | 从无到完美 |
-| 事件ID命中率 ↑ | 0% | **23.3%** | 从无到有 |
+| 幻觉数字率 ↓ | 33.3% | **6.7%** | -80% |
+| 格式合规率 ↑ | 0% | **76.7%** | 从无到有 |
+| 事件ID命中率 ↑ | 0% | **20.0%** | 从无到有 |
 
 ---
 
@@ -227,43 +227,64 @@
 
 ### 4.3 实验结果
 
-#### 四组对照实验（严格控制变量）
+#### 模型选型实验（2 模型 × 3 训练方式）
+
+<p align="center">
+  <img src="docs/visuals/png/experiments/model_selection.png" width="85%" alt="模型选型对比" />
+  <br/>
+  <sub><b>Figure 6</b> · 模型选型：Qwen-0.5B vs Bloom-560M × QLoRA/LoRA/Full FT</sub>
+</p>
+
+| 实验 | 模型 | 训练方式 | Eval Loss↓ | 训练时间 | 结论 |
+|------|------|---------|---:|---:|---|
+| M1_T1 | Qwen-0.5B | QLoRA (4-bit) | 0.923 | 26min | 最省资源 |
+| **M1_T2** | **Qwen-0.5B** | **LoRA (fp32)** | **0.826** ⭐ | **42min** | **最优** |
+| M1_T3 | Qwen-0.5B | Full FT | 0.904 | 30h | 过拟合+太慢 |
+| M2_T1 | Bloom-560M | QLoRA (4-bit) | 1.523 | 17min | 远差于Qwen |
+| M2_T2 | Bloom-560M | LoRA (fp32) | 1.756 | 21min | 最差 |
+| M2_T3 | Bloom-560M | Full FT | 1.224 | 19h | 过拟合 |
+
+**选型结论**：
+1. **Qwen-0.5B 全面优于 Bloom-560M**（eval_loss 低 40-50%），得益于原生中文预训练
+2. **LoRA 是最优训练方式**（eval_loss 最低 0.826），QLoRA 牺牲少量精度换取 38% 加速
+3. **Full FT 严重过拟合**（train_loss 极低但 eval_loss 反弹），且时间不可接受
+
+#### 消融实验（G0→G3，模型原生输出）
+
+<p align="center">
+  <img src="docs/visuals/png/experiments/ablation_g0_g3.png" width="85%" alt="消融实验" />
+  <br/>
+  <sub><b>Figure 7</b> · 消融实验：每一层组件的贡献（无后处理，展示模型真实能力）</sub>
+</p>
 
 | 组 | RAG | 强 prompt | LoRA | 幻觉率↓ | 格式合规↑ | EID命中↑ |
 |---|:---:|:---:|:---:|---:|---:|---:|
-| G0 | ❌ | ❌ | ❌ | 36.7% | 0% | 0% |
-| G1 | ✅ | ❌ | ❌ | 6.7% | 100% | 23.3% |
-| G2 | ✅ | ✅ | ❌ | 3.3% | 100% | 23.3% |
-| **G3** | ✅ | ✅ | ✅ | **3.3%** | **100%** | **23.3%** |
+| G0 | ❌ | ❌ | ❌ | 33.3% | 0% | 0% |
+| G1 | ✅ | ❌ | ❌ | 3.3% | 0% | 0% |
+| G2 | ✅ | ✅ | ❌ | 6.7% | 0% | 0% |
+| **G3** | ✅ | ✅ | ✅ | **6.7%** | **76.7%** | **20.0%** |
 
-#### 与外部基准对标
+**消融结论**：
+1. **RAG 大幅降低幻觉**：G0→G1 幻觉率从 33.3% 降到 3.3%（-90%）
+2. **LoRA 是格式学习的关键**：只有 G3 能原生产出 `[EventID=xxx]` 格式（0% → 76.7%）
+3. **没有 LoRA 的模型完全无法引用**：G0/G1/G2 的格式合规和 EID 命中均为 0%
 
-| 指标 | 本项目 G3 | 业界参考 | 说明 |
-|------|-----------|---------|------|
-| 幻觉率 3.3% | GPT-4: 2-6% | 接近 GPT-4 水平 |
-| 格式合规 100% | GPT-4o: 76% (StructEval) | **超越 GPT-4o** |
-| EID命中 23.3% | Hybrid典型Hit@5: 55-70% | 受检索 Recall 天花板制约 |
+#### 训练效率对比
+
+<p align="center">
+  <img src="docs/visuals/png/experiments/training_efficiency.png" width="75%" alt="训练效率" />
+  <br/>
+  <sub><b>Figure 8</b> · 训练效率：时间 vs 性能（排除 Full FT 异常点）</sub>
+</p>
 
 #### 核心结论
 
-<p align="center">
-  <img src="docs/visuals/png/paper/fig3_hallucination.png" width="75%" alt="幻觉率逐层下降" />
-  <br/>
-  <sub><b>Figure 3</b> · 幻觉数字率逐层下降 36.7% → 6.7% → 3.3% → 3.3%</sub>
-</p>
+1. **RAG 解决幻觉**：33.3% → 3.3%（-90%），证据约束是最有效的幻觉缓解手段
+2. **LoRA 解决格式**：0% → 76.7%，<1B 模型必须靠微调才能学会结构化引用格式
+3. **Qwen > Bloom**：原生中文预训练带来 40-50% 的 loss 优势
+4. **LoRA > QLoRA > Full FT**：LoRA 泛化最好，QLoRA 资源最省，Full FT 过拟合
 
-1. **RAG 是最关键一步**：G0→G1 幻觉率从 36.7% 降到 6.7%（-82%），格式从 0% 到 100%
-2. **强约束 prompt 进一步降幻觉**：G1→G2 从 6.7% 降到 3.3%（-50%）
-3. **LoRA 确保鲁棒性**：G3 在多样化输入下维持 G2 最优水平，是生产部署的安全保障
-4. **成本极低**：21 min 训练，+34MB adapter
-
-<p align="center">
-  <img src="docs/visuals/png/paper/fig5_loss.png" width="70%" alt="训练收敛" />
-  <br/>
-  <sub><b>Figure 4</b> · QLoRA 训练收敛曲线（loss 2.52 → 0.70, 274 steps）</sub>
-</p>
-
-详细评测：[`docs/evaluation_metrics.md`](docs/evaluation_metrics.md) | [`docs/reports/m4_4_generation_eval.md`](docs/reports/m4_4_generation_eval.md)
+详细评测：[`docs/evaluation_metrics.md`](docs/evaluation_metrics.md) | [`docs/reports/model_comparison_final.json`](docs/reports/model_comparison_final.json)
 
 ---
 
