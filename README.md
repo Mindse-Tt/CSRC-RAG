@@ -289,16 +289,18 @@
 
 详细评测：[`docs/evaluation_metrics.md`](docs/evaluation_metrics.md) | [`docs/reports/model_comparison_final.json`](docs/reports/model_comparison_final.json)
 
-#### 最终 6 项指标总表（最优模型 Qwen + LoRA，n=50）
+#### 最终 6 项指标总表（n=50，同测试集同条件对比）
 
-| 指标 | G0 (裸模型) | G3 (+RAG+LoRA) | 提升 | 说明 |
-|------|:-----------:|:--------------:|:----:|------|
-| **Hallucination Rate** ↓ | 18.0% | **2.0%** | -89% | 三层防线叠加效果 |
-| **Event ID Hit Rate** ↑ | 0% | **28.0%** | +28pp | LoRA 教会模型引用 |
-| **Format Compliance** ↑ | 0% | **76.0%** | +76pp | 结构化输出能力 |
-| **Task Accuracy** ↑ | 0% | **28.0%** | +28pp | 正确完成检索任务 |
-| **Entity F1** ↑ | 0.0 | **0.52** | +0.52 | 领域实体抽取能力 |
-| **Instruction Following** ↑ | 0% | **76.0%** | +76pp | 指令遵循能力 |
+| 指标 | Bloom-560M + QLoRA | **Qwen-0.5B + LoRA** | 差距 |
+|------|:------------------:|:--------------------:|:----:|
+| **Hallucination Rate** ↓ | 79.3% | **2.0%** | -77.3pp |
+| **Event ID Hit Rate** ↑ | 0% | **28.0%** | +28pp |
+| **Format Compliance** ↑ | 8.0% | **76.0%** | +68pp |
+| **Task Accuracy** ↑ | 0% | **28.0%** | +28pp |
+| **Entity F1** ↑ | ~0.04 | **0.52** | +0.48 |
+| **Instruction Following** ↑ | 8.0% | **76.0%** | +68pp |
+
+**结论**：Qwen-0.5B + LoRA 在所有 6 项指标上全面碾压 Bloom-560M，幻觉率低 77pp，格式合规高 68pp，证明模型选型和训练方式的双重优势。
 
 #### Good Cases 展示
 
