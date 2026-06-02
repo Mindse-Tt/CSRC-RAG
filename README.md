@@ -1,17 +1,17 @@
-# CSRC-RAG: A RAG-based Intelligent Q&A System for Securities Regulatory Penalty Cases with QLoRA Fine-tuning and Multi-layer Hallucination Control
+# CSRC-RAG: A RAG-based Intelligent Q&A System for Securities Regulatory Penalty Cases with LoRA Fine-tuning and Multi-layer Hallucination Control
 
 # 证监会违规案例智能检索与问答系统
 
 <p align="center">
   <img src="https://img.shields.io/badge/Track-B-blue" />
   <img src="https://img.shields.io/badge/Base-Qwen2.5--0.5B-orange" />
-  <img src="https://img.shields.io/badge/Method-QLoRA-green" />
+  <img src="https://img.shields.io/badge/Method-LoRA-green" />
   <img src="https://img.shields.io/badge/GPU-RTX_2060S_8GB-lightgrey" />
 </p>
 
 **深度学习课程设计 · 赛道 B（垂直领域智能问答）** · 2026.04
 
-作者：许浩财 · 贾彤 · 戴一鑫 · 张彦扬 · 王怡菲
+作者：许浩财 · Jia Tong · 戴一鑫 · 张彦扬 · 王怡菲
 
 ---
 
@@ -37,13 +37,13 @@
 
 ### 我们的解决方案
 
-用 **RAG + QLoRA 指令微调 + 规则校验** 三层防线系统性解决，在 **<1B 参数量、8GB 消费级 GPU** 的硬约束下实现：
+用 **RAG + LoRA 指令微调 + 规则校验** 三层防线系统性解决，在 **<1B 参数量、8GB 消费级 GPU** 的硬约束下实现：
 
 | 指标 | 微调前 (G0) | 微调后 (G3) | 提升 |
 |------|:-----------:|:-----------:|:----:|
-| 幻觉数字率 ↓ | 33.3% | **6.7%** | -80% |
-| 格式合规率 ↑ | 0% | **76.7%** | 从无到有 |
-| 事件ID命中率 ↑ | 0% | **20.0%** | 从无到有 |
+| 幻觉数字率 ↓ | 18.0% | **2.0%** | -89% |
+| 格式合规率 ↑ | 0% | **76.0%** | 从无到有 |
+| 事件ID命中率 ↑ | 0% | **28.0%** | 从无到有 |
 
 ---
 
@@ -86,7 +86,7 @@
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────┐
-│ L5 生成：Qwen2.5-0.5B + QLoRA 生成                            │
+│ L5 生成：Qwen2.5-0.5B + LoRA 生成                              │
 │     r=16, α=32, 4-bit NF4 量化, 全 attention+FFN 层     │
 └─────────────────────────────────────────────────────────┘
                  │
@@ -113,8 +113,8 @@
 | L1 | 意图分类 | TF-IDF + LogReg | F1=0.9989，更复杂模型无收益 |
 | L3 | 稠密检索 | bge-small-zh-v1.5 | 99MB，中文MTEB Top-3，显存友好 |
 | L4 | 精排 | bge-reranker-v2-m3 | 中文最优 cross-encoder |
-| L5 | 生成 | Qwen2.5-0.5B + QLoRA | **8GB GPU 硬约束下唯一能全链路部署的选择** |
-| L5 | 量化 | 4-bit NF4 | QLoRA 原生支持，精度损失 <1% |
+| L5 | 生成 | Qwen2.5-0.5B + LoRA | **实验证明 LoRA 泛化优于 QLoRA 和 Full FT** |
+| L5 | 微调 | LoRA r=16, α=32 | eval_loss=0.826，最优训练方式 |
 
 ### 2.3 大模型 Prompt 设计
 
@@ -163,7 +163,7 @@
 
 | 文件 | 样本数 | 类别分布 | 用途 |
 |------|--------|---------|------|
-| `data/processed/rag_qa_train.jsonl` | 960 | A/B/C/D 各 240 | QLoRA 训练 |
+| `data/processed/rag_qa_train.jsonl` | 5360 | A-H 8类 | LoRA 训练 |
 | `data/processed/rag_qa_val.jsonl` | 120 | A/B/C/D 各 30 | 验证集 |
 | `data/processed/rag_qa_test.jsonl` | 120 | A/B/C/D 各 30 | 最终评测 |
 
@@ -221,7 +221,7 @@
 
 | 指标 | 定义 | 学术引用 |
 |------|------|---------|
-| **Task Accuracy** | 关键字段与标准答案完全匹配的比例 | QLoRA (Dettmers et al., NeurIPS 2023) |
+| **Task Accuracy** | 关键字段与标准答案完全匹配的比例 | LoRA (Hu et al., ICLR 2022) |
 | **Entity F1** | 领域实体（公司/金额/违规类型）的 Micro-F1 | CoNLL-2003 NER, 金融NER文献 |
 | **Instruction Following** | 同时满足格式+字段+结构约束的比例 | Vicuna (Chiang 2023), StructEval (2025) |
 
@@ -259,15 +259,16 @@
 
 | 组 | RAG | 强 prompt | LoRA | 幻觉率↓ | 格式合规↑ | EID命中↑ |
 |---|:---:|:---:|:---:|---:|---:|---:|
-| G0 | ❌ | ❌ | ❌ | 33.3% | 0% | 0% |
-| G1 | ✅ | ❌ | ❌ | 3.3% | 0% | 0% |
-| G2 | ✅ | ✅ | ❌ | 6.7% | 0% | 0% |
-| **G3** | ✅ | ✅ | ✅ | **6.7%** | **76.7%** | **20.0%** |
+| G0 | ❌ | ❌ | ❌ | 18.0% | 0% | 0% |
+| G1 | ✅ | ❌ | ❌ | 10.0% | 0% | 0% |
+| G2 | ✅ | ✅ | ❌ | 8.0% | 0% | 0% |
+| **G3** | ✅ | ✅ | ✅ | **2.0%** | **76.0%** | **28.0%** |
 
 **消融结论**：
-1. **RAG 大幅降低幻觉**：G0→G1 幻觉率从 33.3% 降到 3.3%（-90%）
-2. **LoRA 是格式学习的关键**：只有 G3 能原生产出 `[EventID=xxx]` 格式（0% → 76.7%）
-3. **没有 LoRA 的模型完全无法引用**：G0/G1/G2 的格式合规和 EID 命中均为 0%
+1. **RAG 大幅降低幻觉**：G0→G1 幻觉率从 18.0% 降到 10.0%（-44%）
+2. **强 prompt 继续降幻觉**：G1→G2 从 10.0% 降到 8.0%（-20%）
+3. **LoRA 是格式学习的关键**：只有 G3 能原生产出 `[EventID=xxx]` 格式（0% → 76.0%）
+4. **LoRA 将幻觉降到最低**：G2→G3 从 8.0% 降到 2.0%（-75%），三层防线叠加效果最优
 
 #### 训练效率对比
 
@@ -279,8 +280,8 @@
 
 #### 核心结论
 
-1. **RAG 解决幻觉**：33.3% → 3.3%（-90%），证据约束是最有效的幻觉缓解手段
-2. **LoRA 解决格式**：0% → 76.7%，<1B 模型必须靠微调才能学会结构化引用格式
+1. **RAG 解决幻觉**：18.0% → 10.0%（-44%），证据约束是最有效的幻觉缓解手段
+2. **LoRA 解决格式 + 进一步降幻觉**：0% → 76.0% 格式合规，8.0% → 2.0% 幻觉率
 3. **Qwen > Bloom**：原生中文预训练带来 40-50% 的 loss 优势
 4. **LoRA > QLoRA > Full FT**：LoRA 泛化最好，QLoRA 资源最省，Full FT 过拟合
 
@@ -342,7 +343,7 @@ PYTHONPATH=src python scripts/build_event_chunks.py
 # Step 2: 离线检索评测 (~3 min)
 PYTHONPATH=src python scripts/evaluate_retrieval_sanity.py
 
-# Step 3: QLoRA 训练 (~52 min)
+# Step 3: LoRA 训练 (~42 min)
 python scripts/train_qlora_m4.py
 
 # Step 4: G0-G3 四组评测 (~30 min)
@@ -416,7 +417,7 @@ Deeplearning-Rag-Test/
 
 ```bibtex
 @misc{xu2026csrcrag,
-  title={CSRC-RAG: A RAG-based Intelligent Q\&A System for Securities Regulatory Penalty Cases with QLoRA Fine-tuning and Multi-layer Hallucination Control},
+  title={CSRC-RAG: A RAG-based Intelligent Q\&A System for Securities Regulatory Penalty Cases with LoRA Fine-tuning and Multi-layer Hallucination Control},
   author={Xu, Haocai and Jia, Tong and Dai, Yixin and Zhang, Yanyang and Wang, Yifei},
   year={2026},
   howpublished={\url{https://github.com/Mindse-Tt/Deeplearning-Rag-Test}},
@@ -431,5 +432,5 @@ Deeplearning-Rag-Test/
 ---
 
 <p align="center">
-  <sub>Built with Qwen2.5 · QLoRA · RAG · Hallucination-aware Design</sub>
+  <sub>Built with Qwen2.5 · LoRA · RAG · Hallucination-aware Design</sub>
 </p>
