@@ -249,6 +249,8 @@
 2. **LoRA 是最优训练方式**（eval_loss 最低 0.826），QLoRA 牺牲少量精度换取 38% 加速
 3. **Full FT 严重过拟合**（train_loss 极低但 eval_loss 反弹），且时间不可接受
 
+> **Eval Loss 含义**：在模型未见过的验证集（670 条）上计算交叉熵损失，衡量模型对新数据的预测准确度。越低说明泛化能力越强，越高说明模型在训练集上过拟合。
+
 #### 消融实验（G0→G3，模型原生输出）
 
 <p align="center">
@@ -286,6 +288,17 @@
 4. **LoRA > QLoRA > Full FT**：LoRA 泛化最好，QLoRA 资源最省，Full FT 过拟合
 
 详细评测：[`docs/evaluation_metrics.md`](docs/evaluation_metrics.md) | [`docs/reports/model_comparison_final.json`](docs/reports/model_comparison_final.json)
+
+#### 最终 6 项指标总表（最优模型 Qwen + LoRA，n=50）
+
+| 指标 | G0 (裸模型) | G3 (+RAG+LoRA) | 提升 | 说明 |
+|------|:-----------:|:--------------:|:----:|------|
+| **Hallucination Rate** ↓ | 18.0% | **2.0%** | -89% | 三层防线叠加效果 |
+| **Event ID Hit Rate** ↑ | 0% | **28.0%** | +28pp | LoRA 教会模型引用 |
+| **Format Compliance** ↑ | 0% | **76.0%** | +76pp | 结构化输出能力 |
+| **Task Accuracy** ↑ | 0% | **28.0%** | +28pp | 正确完成检索任务 |
+| **Entity F1** ↑ | 0.0 | **0.52** | +0.52 | 领域实体抽取能力 |
+| **Instruction Following** ↑ | 0% | **76.0%** | +76pp | 指令遵循能力 |
 
 #### Good Cases 展示
 
